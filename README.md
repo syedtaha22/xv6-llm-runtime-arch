@@ -7,8 +7,9 @@ This project is an experimental starting point for exploring how an operating sy
 ## Table of Contents
 
 - [Introduction and Overview](#introduction--overview)
+- [References / Acknowledgements](#references--acknowledgements)
 
-***
+---
 
 ## Introduction / Overview
 
@@ -25,3 +26,9 @@ The aim of this project is to explore modifications to the OS runtime environmen
 ### Current Status
 
 This project is in the **early experimental phase**. The current files and structures are intended for research and architectural exploration. Functional optimizations are not yet implemented, and this serves as the initial groundwork for further development.
+
+---
+
+## References / Acknowledgements
+
+- **LLama2.c:** This project uses [llama2.c](https://github.com/karpathy/llama2.c) as the current inference engine for testing and experimentation.  
