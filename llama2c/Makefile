@@ -74,3 +74,9 @@ testcc:
 clean:
 	rm -f run
 	rm -f runq
+
+# builds with -O2 and debug info, disables inlining to make profiling/benchmarks more accurate
+.PHONY: bench
+bench:
+	$(CC) -O2 -g -fno-omit-frame-pointer -fno-inline -fno-inline-functions -o run run.c -lm
+	$(CC) -O2 -g -fno-omit-frame-pointer -fno-inline -fno-inline-functions -o runq runq.c -lm
