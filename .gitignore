@@ -1,5 +1,60 @@
-.vscode
-.temp
+# ===========================================
+#  Build Artifacts (C / C++)
+# ===========================================
+# Object and binary files
+*.o
+*.a
+*.so
+*.out
 *.exe
 
+# Compiled binaries from llama2c builds
+run
+runq
+bench_*
+test_*
+
+# ===========================================
+#  LLaMA2C Project-Specific
+# ===========================================
+# Model binaries and checkpoints — heavy, not for git
+models/
 llama2c/models/
+
+# Raw perf data (binary profiling traces)
+perf.data
+perf.data.old
+
+# ===========================================
+#  Editor and Environment Files
+# ===========================================
+.vscode/
+.idea/
+*.code-workspace
+.temp/
+
+# ===========================================
+#  Python Helper Scripts (if any)
+# ===========================================
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# ===========================================
+#  Temporary and Log Files
+# ===========================================
+*.log
+*.tmp
+
+# ===========================================
+#  Keep Useful Data / Reports
+# ===========================================
+# Keep all results/ files (do NOT ignore results/)
+# Keep text and CSV outputs
+!*.txt
+!*.csv
+
+# ===========================================
+#  End of .gitignore
+# ===========================================
