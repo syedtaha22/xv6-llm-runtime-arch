@@ -1,0 +1,26 @@
+Function Benchmark Results ( 1000 evaluations per function )
+
+Function: std::exp
+  Time: 0.0000604 seconds
+  Avg Relative Error: 0.0000000
+
+Function: taylor_series_exp_1000
+  Time: 0.0010164 seconds
+  Avg Relative Error: 0.0536583
+
+Function: taylor_series_exp_10
+  Time: 0.0000031 seconds
+  Avg Relative Error: 788888.0625000
+
+Function: range_reduced_exp
+  Time: 0.0000077 seconds
+  Avg Relative Error: 0.0000001
+
+Function: rr_exp_fastexp2
+  Time: 0.0000051 seconds
+  Avg Relative Error: 0.0000001
+
+Function: rr_exp_horner
+  Time: 0.0000043 seconds
+  Avg Relative Error: 0.0000000
+
