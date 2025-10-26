@@ -1,3 +1,5 @@
 .vscode
 .temp
 *.exe
+
+llama2c/models/
