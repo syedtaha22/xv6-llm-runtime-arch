@@ -1,0 +1,53 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 16K of event 'cycles:P'
+# Event count (approx.): 14518098225
+#
+# Overhead  Command  Shared Object         Symbol                           
+# ........  .......  ....................  .................................
+#
+    95.71%  run      run                   [.] matmul
+     2.28%  run      run                   [.] forward
+     0.64%  run      libm.so.6             [.] __expf_fma
+     0.48%  run      run                   [.] softmax
+     0.19%  run      run                   [.] sample
+     0.15%  run      run                   [.] sample_topp
+     0.07%  run      libc.so.6             [.] __strcmp_evex
+     0.07%  run      run                   [.] rmsnorm
+     0.06%  run      libc.so.6             [.] __memmove_evex_unaligned_erms
+     0.06%  run      libm.so.6             [.] __sincosf_fma
+     0.06%  run      libc.so.6             [.] msort_with_tmp.part.0
+     0.05%  run      libm.so.6             [.] __powf_fma
+     0.02%  run      run                   [.] expf@plt
+     0.02%  run      libc.so.6             [.] _int_malloc
+     0.02%  run      run                   [.] compare
+     0.02%  run      [unknown]             [k] 0xffffffff8fc01248
+     0.01%  run      libc.so.6             [.] __memset_evex_unaligned_erms
+     0.01%  run      run                   [.] free@plt
+     0.01%  run      run                   [.] sincosf@plt
+     0.01%  run      run                   [.] generate
+     0.01%  run      libc.so.6             [.] __strlen_evex
+     0.01%  run      libc.so.6             [.] __vfscanf_internal
+     0.01%  run      libc.so.6             [.] malloc_consolidate
+     0.01%  run      [unknown]             [k] 0xffffffff8fc001c4
+     0.01%  run      libc.so.6             [.] malloc
+     0.01%  run      run                   [.] compare_tokens
+     0.01%  run      libc.so.6             [.] __mempcpy_evex_unaligned_erms
+     0.01%  run      libc.so.6             [.] __mempcpy@plt
+     0.00%  run      run                   [.] strcmp@plt
+     0.00%  run      run                   [.] encode
+     0.00%  run      libc.so.6             [.] _IO_fread
+     0.00%  run      run                   [.] build_tokenizer
+     0.00%  run      ld-linux-x86-64.so.2  [.] _dl_relocate_object
+     0.00%  run      libc.so.6             [.] _IO_sgetn
+     0.00%  run      ld-linux-x86-64.so.2  [.] do_lookup_x
+     0.00%  run      ld-linux-x86-64.so.2  [.] _dl_lookup_symbol_x
+     0.00%  run      ld-linux-x86-64.so.2  [.] _dl_load_cache_lookup
+
+
+#
+# (Cannot load tips.txt file, please install perf!)
+#

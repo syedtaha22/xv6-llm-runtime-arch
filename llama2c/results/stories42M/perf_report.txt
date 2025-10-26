@@ -1,0 +1,52 @@
+# To display the perf.data header info, please use --header/--header-only options.
+#
+#
+# Total Lost Samples: 0
+#
+# Samples: 46K of event 'cycles:P'
+# Event count (approx.): 40839908125
+#
+# Overhead  Command  Shared Object         Symbol                           
+# ........  .......  ....................  .................................
+#
+    97.26%  run      run                   [.] matmul
+     1.96%  run      run                   [.] forward
+     0.24%  run      run                   [.] softmax
+     0.20%  run      libm.so.6             [.] __expf_fma
+     0.07%  run      run                   [.] sample
+     0.03%  run      run                   [.] sample_topp
+     0.03%  run      libm.so.6             [.] __powf_fma
+     0.03%  run      run                   [.] rmsnorm
+     0.03%  run      libc.so.6             [.] __strcmp_evex
+     0.03%  run      libc.so.6             [.] msort_with_tmp.part.0
+     0.02%  run      libm.so.6             [.] __sincosf_fma
+     0.02%  run      run                   [.] compare
+     0.01%  run      run                   [.] expf@plt
+     0.01%  run      libc.so.6             [.] __memmove_evex_unaligned_erms
+     0.01%  run      [unknown]             [k] 0xffffffff8fc01248
+     0.01%  run      libc.so.6             [.] _IO_fread
+     0.00%  run      libc.so.6             [.] __printf_chk
+     0.00%  run      libc.so.6             [.] __vfscanf_internal
+     0.00%  run      libc.so.6             [.] __memset_evex_unaligned_erms
+     0.00%  run      libc.so.6             [.] _IO_sgetn
+     0.00%  run      libc.so.6             [.] _IO_file_xsgetn
+     0.00%  run      libc.so.6             [.] _int_free
+     0.00%  run      libc.so.6             [.] _IO_file_sync@@GLIBC_2.2.5
+     0.00%  run      libc.so.6             [.] __GI___qsort_r
+     0.00%  run      run                   [.] memset@plt
+     0.00%  run      libc.so.6             [.] qsort
+     0.00%  run      libc.so.6             [.] __ctype_b_loc
+     0.00%  run      run                   [.] powf@plt
+     0.00%  run      libc.so.6             [.] __mempcpy_evex_unaligned_erms
+     0.00%  run      libc.so.6             [.] __printf_buffer
+     0.00%  run      run                   [.] strcmp@plt
+     0.00%  run      ld-linux-x86-64.so.2  [.] do_lookup_x
+     0.00%  run      run                   [.] fread@plt
+     0.00%  run      ld-linux-x86-64.so.2  [.] _dl_relocate_object
+     0.00%  run      [unknown]             [k] 0xffffffff8fc001c4
+     0.00%  run      libm.so.6             [.] exp2f@@GLIBC_2.27
+
+
+#
+# (Cannot load tips.txt file, please install perf!)
+#

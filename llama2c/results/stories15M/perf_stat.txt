@@ -1,0 +1,6 @@
+achieved tok/s: 61.904762
+2346.99,msec,task-clock,2346986266,100.00,1.000,CPUs utilized
+8273567876,,cycles,2346986266,100.00,3.525,GHz
+13970425797,,instructions,2346986266,100.00,1.69,insn per cycle
+137650563,,cache-references,2346986266,100.00,58.650,M/sec
+50742035,,cache-misses,2346986266,100.00,36.86,of all cache refs
