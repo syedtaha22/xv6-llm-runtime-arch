@@ -32,3 +32,13 @@ This project is in the **early experimental phase**. The current files and struc
 ## References / Acknowledgements
 
 - **LLama2.c:** This project uses [llama2.c](https://github.com/karpathy/llama2.c) as the current inference engine for testing and experimentation.  
+
+**Note:** To download the models used for benchmarking:
+
+```bash
+wget https://huggingface.co/karpathy/tinyllamas/resolve/main/stories15M.bin
+
+wget https://huggingface.co/karpathy/tinyllamas/resolve/main/stories42M.bin
+
+wget https://huggingface.co/karpathy/tinyllamas/resolve/main/stories110M.bin
+```
