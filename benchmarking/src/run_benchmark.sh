@@ -138,7 +138,7 @@ CSV_BASE_NAME="$(basename "$SOURCE_DIRECTORY")"
 # Construct the full CSV filename based on the base name.
 CSV_FILE_NAME="raw_${CSV_BASE_NAME}_data.csv"
 # Define the expected full path to the generated CSV file.
-CSV_FILE_PATH="logs/${CSV_FILE_NAME}"
+CSV_FILE_PATH="results/${CSV_FILE_NAME}"
 
 # Validate source directory existence.
 # The script exits if the directory is not found, providing a descriptive error.

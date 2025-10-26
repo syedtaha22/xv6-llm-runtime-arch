@@ -216,16 +216,16 @@ namespace Benchmark {
         }
 
         /**
-         * @brief Logs the benchmark results (time and aggregated error) to a specified file within the 'logs' directory.
-         * Creates the 'logs' directory if it doesn't exist.
+         * @brief Logs the benchmark results (time and aggregated error) to a specified file within the 'results' directory.
+         * Creates the 'results' directory if it doesn't exist.
          * @param filename The name of the log file (e.g., "exp_results.log").
          */
         void log_results(const std::string& filename = "results.log") const {
-            // Create the 'logs' directory if it doesn't exist
-            std::filesystem::path log_dir = "logs";
+            // Create the 'results' directory if it doesn't exist
+            std::filesystem::path log_dir = "results";
             if (!std::filesystem::exists(log_dir)) {
                 if (!std::filesystem::create_directory(log_dir)) {
-                    std::cerr << "Error: Failed to create 'logs' directory.\n";
+                    std::cerr << "Error: Failed to create 'results' directory.\n";
                     return;
                 }
             }
@@ -278,10 +278,10 @@ namespace Benchmark {
          * @param filename The name of the CSV file (e.g., "raw_sine_data.csv").
          */
         void save_raw_results_to_csv(const std::string& filename = "raw_benchmark_data.csv") const {
-            std::filesystem::path log_dir = "logs";
+            std::filesystem::path log_dir = "results";
             if (!std::filesystem::exists(log_dir)) {
                 if (!std::filesystem::create_directory(log_dir)) {
-                    std::cerr << "Error: Failed to create 'logs' directory for CSV.\n";
+                    std::cerr << "Error: Failed to create 'results' directory for CSV.\n";
                     return;
                 }
             }
