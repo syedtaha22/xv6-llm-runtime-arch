@@ -46,7 +46,7 @@ class BenchmarkPlotter:
             ('#4DAF4A', 50, 0.7),  # Green, 50 size, 0.7 alpha
             ('#984EA3', 45, 0.6),  # Purple, 45 size, 0.6 alpha
             ('#FF7F00', 40, 0.5),  # Orange, 40 size, 0.5 alpha
-            ('#FFFF33', 35, 0.4),  # Yellow, 35 size, 0.4 alpha
+            ("#737300", 35, 0.4),  # Olive, 35 size, 0.4 alpha
             ('#A65628', 30, 0.3),  # Brown, 30 size, 0.3 alpha
             ('#F781BF', 25, 0.2)   # Pink, 25 size, 0.2 alpha
         ]
