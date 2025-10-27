@@ -16,7 +16,7 @@
  * where n is the term index (starting from 0 for x, 1 for -x^3/3!, etc.)
  *
  * @param x The input value for which to calculate sine.
- * @param num_terms The number of terms to use in the Taylor series (default: 7).
+ * @param num_terms The number of terms to use in the Taylor series (default: 1000).
  * More terms generally lead to higher accuracy but increased computation.
  * @return The approximated sine value.
  */
