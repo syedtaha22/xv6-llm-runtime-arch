@@ -1,22 +1,22 @@
 Function Benchmark Results ( 1000 evaluations per function )
 
 Function: std::sin
-  Time: 0.0000128 seconds
+  Time: 0.0000250 seconds
   Avg Relative Error: 0.0000000
 
 Function: taylor_series_sine_1000
-  Time: 0.0011315 seconds
-  Avg Relative Error: 0.0000232
+  Time: 0.0020338 seconds
+  Avg Relative Error: 0.0000256
 
 Function: taylor_series_sine_7
-  Time: 0.0000043 seconds
-  Avg Relative Error: 87.3791733
+  Time: 0.0000085 seconds
+  Avg Relative Error: 99.4953461
 
 Function: range_reduced_sine
-  Time: 0.0000136 seconds
-  Avg Relative Error: 0.0000011
+  Time: 0.0000231 seconds
+  Avg Relative Error: 0.0000007
 
 Function: rr_sine_horner
-  Time: 0.0000093 seconds
-  Avg Relative Error: 0.0000010
+  Time: 0.0000169 seconds
+  Avg Relative Error: 0.0000007
 

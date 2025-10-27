@@ -1,0 +1,18 @@
+Function Benchmark Results ( 1000 evaluations per function )
+
+Function: std::tanh
+  Time: 0.0000746 seconds
+  Avg Relative Error: 0.0000000
+
+Function: tanh_exp
+  Time: 0.0000126 seconds
+  Avg Relative Error: 0.0000000
+
+Function: asymptotic_tanh
+  Time: 0.0000136 seconds
+  Avg Relative Error: 0.0000047
+
+Function: asymptotic_tanh_horner
+  Time: 0.0000118 seconds
+  Avg Relative Error: 92614608.0000000
+
