@@ -1,0 +1,30 @@
+Function Benchmark Results ( 1000 evaluations per function )
+
+Function: std::sqrt
+  Time: 0.0000019 seconds
+  Avg Relative Error: 0.0000000
+
+Function: nr_sqrt_1000
+  Time: 0.0034926 seconds
+  Avg Relative Error: 0.0000000
+
+Function: nr_sqrt_10
+  Time: 0.0000064 seconds
+  Avg Relative Error: 0.0095243
+
+Function: nr_sqrt_5
+  Time: 0.0000029 seconds
+  Avg Relative Error: 9.3682289
+
+Function: quake3_nr_sqrt_3
+  Time: 0.0000018 seconds
+  Avg Relative Error: 0.0000000
+
+Function: quake3_nr_sqrt_5
+  Time: 0.0000029 seconds
+  Avg Relative Error: 0.0000000
+
+Function: intel_sqrt
+  Time: 0.0000012 seconds
+  Avg Relative Error: 0.0000000
+
