@@ -1,78 +1,59 @@
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
 import argparse
 import os
-import matplotlib.axes as axes  # Import Axes directly for type hinting
-import matplotlib.figure as figure  # Import Figure directly for type hinting
-from typing import List, Tuple
+import numpy as np
+import matplotlib.axes as axes 
+import matplotlib.figure as figure 
+from typing import List, Tuple, Optional
+
+# Global constant is no longer strictly needed for y-limits but kept for future use
+FIXED_Y_PADDING = 1.0 
 
 class BenchmarkPlotter:
     """
-    A class to read benchmark results from a CSV file and plot them.
+    A class to read benchmark results and generate error and distribution plots.
 
-    This class handles loading the data, configuring plot aesthetics,
-    plotting multiple function outputs against a common x-axis, and
-    saving the plot to a PNG file. It is designed to be robust against
-    large datasets by configuring Matplotlib's chunking behavior.
-
-    Attributes
-    ----------
-    csv_filepath : str
-        The path to the input CSV file containing benchmark data.
-    plots_dir : str
-        The directory where the generated plots will be saved.
-    df : Optional[pd.DataFrame]
-        The DataFrame holding the loaded CSV data. None if loading fails.
-    x_values : Optional[pd.Series]
-        The 'x' column data from the CSV. None if not loaded.
-    function_columns : Optional[List[str]]
-        A list of column names representing the function outputs to plot.
-        None if not loaded.
-    linestyles : List[str]
-        A list of linestyles to cycle through for plots.
-    colors : List[Tuple[float, float, float, float]]
-        A list of RGBA colors to cycle through for plots.
+    Generates two plots:
+    1. Agreement Scatter Plot (Approximation vs. Reference)
+    2. Function Output Correlation Heatmap (Covariance)
     """
 
     def __init__(self, csv_filepath: str, plots_dir: str = "plots"):
         """
         Initializes the BenchmarkPlotter with file paths and sets Matplotlib rcParams.
-
-        Parameters
-        ----------
-        csv_filepath : str
-            The path to the input CSV file.
-        plots_dir : str, optional
-            The directory to save plots. Defaults to "plots".
         """
         self.csv_filepath = csv_filepath
         self.plots_dir = plots_dir
-        self.df = None
-        self.x_values = None
-        self.function_columns = None
+        self.df: Optional[pd.DataFrame] = None
+        self.x_values: Optional[pd.Series] = None
+        self.function_columns: Optional[List[str]] = None
+        self.reference_col: Optional[str] = None
+        self.approximation_cols: Optional[List[str]] = None
 
-        # --- Matplotlib configuration for large datasets ---
-        # Set the chunk size for the Agg backend. This breaks large paths into smaller segments.
-        # A value of 20000-50000 is often good for millions of points.
+        # --- Matplotlib configuration ---
         plt.rcParams['agg.path.chunksize'] = 20000
-        # For very dense plots, you might also consider increasing path.simplify_threshold
-        # plt.rcParams['path.simplify_threshold'] = 0.5 # Example, adjust as needed (default is 0.111)
-        # --- END Matplotlib configuration ---
 
-        self.linestyles: List[str] = ['-', '--', ':', '-.']
-        self.colors: List[Tuple[float, float, float, float]] = plt.get_cmap('tab10').colors 
+        # --- Plot Aesthetics ---
+        # Marker is fixed to 'o' (dot) and size is slightly increased
+        self.scatter_marker = 'o'
+
+        # Custom hex color list chosen for maximum visual distance (e.g., Red, Blue, Green, Purple, Orange)
+        self.marker_styles: List[Tuple[str, int, int]] = [
+            ('#E41A1C', 100, 1),  # Red, 100 size, 1 alpha
+            ('#377EB8', 55, 0.8),  # Blue, 55 size, 0.8 alpha
+            ('#4DAF4A', 50, 0.7),  # Green, 50 size, 0.7 alpha
+            ('#984EA3', 45, 0.6),  # Purple, 45 size, 0.6 alpha
+            ('#FF7F00', 40, 0.5),  # Orange, 40 size, 0.5 alpha
+            ('#FFFF33', 35, 0.4),  # Yellow, 35 size, 0.4 alpha
+            ('#A65628', 30, 0.3),  # Brown, 30 size, 0.3 alpha
+            ('#F781BF', 25, 0.2)   # Pink, 25 size, 0.2 alpha
+        ]
 
     def _load_data(self) -> bool:
         """
-        Loads data from the CSV file and performs initial validation.
-
-        Loads the CSV into a pandas DataFrame, sorts it by the 'x' column,
-        and populates `self.df`, `self.x_values`, and `self.function_columns`.
-
-        Returns
-        -------
-        bool
-            True if data loading and validation are successful, False otherwise.
+        Loads data from the CSV file and identifies reference/approximation columns.
         """
         try:
             temp_df = pd.read_csv(self.csv_filepath)
@@ -84,135 +65,162 @@ class BenchmarkPlotter:
             return False
 
         if 'x' not in temp_df.columns:
-            print("Error: CSV file must contain an 'x' column for the input values.")
+            print("Error: CSV file must contain an 'x' column.")
             return False
 
-        # Sort the DataFrame by the 'x' column for correct line plotting
         self.df = temp_df.sort_values(by='x').reset_index(drop=True)
         self.x_values = self.df['x']
-        self.function_columns = [col for col in self.df.columns if col != 'x']
+        
+        all_cols = [col for col in self.df.columns if col != 'x']
+        if len(all_cols) < 1:
+             print("Error: CSV must contain at least one function output column.")
+             return False
+
+        self.reference_col = all_cols[0]
+        self.approximation_cols = all_cols[1:]
+        self.function_columns = all_cols
+        
         return True
 
-    def _determine_y_limits(self) -> Tuple[float, float]:
+    def _plot_agreement(self, ax: axes.Axes):
         """
-        Calculates dynamic y-axis limits based on the min/max of all function outputs.
-
-        Assumes `self.df` and `self.function_columns` are already populated by `_load_data`.
-
-        Returns
-        -------
-        tuple[float, float]
-            A tuple containing (min_y_limit, max_y_limit) for the plot.
+        Creates a scatter plot of approximation outputs vs. reference outputs (Y=X plot).
         """
-        # These assertions are for static analysis (Pylance) and runtime safety
-        assert self.df is not None, "DataFrame not loaded. Call _load_data() first."
-        assert self.function_columns is not None, "Function columns not prepared. Call _load_data() first."
+        assert self.df is not None and self.reference_col is not None
+        
+        # Determine shared limits for the square plot
+        ref_values = self.df[self.reference_col]
+        min_val = ref_values.min()
+        max_val = ref_values.max()
+        
+        padding = (max_val - min_val) * 0.05 + 0.01 
+        if padding < 0.1: padding = 0.1
 
-        min_y = float('inf')
-        max_y = float('-inf')
+        plot_min = min_val - padding
+        plot_max = max_val + padding
 
-        for col in self.function_columns:
-            y_values = self.df[col]
-            min_y = min(min_y, y_values.min())
-            max_y = max(max_y, y_values.max())
+        # 1. Plot the y=x (agreement) line
+        ax.plot([plot_min, plot_max], [plot_min, plot_max], 
+                'k--', alpha=0.8, label='Perfect Agreement (y=x)') # Draw the dotted line y=x
+        
+        # 2. Scatter approximation outputs against reference
+        for i, col in enumerate(self.approximation_cols):
+            style = self.marker_styles[i % len(self.marker_styles)]
+            sns.scatterplot(
+                x=self.df[self.reference_col], 
+                y=self.df[col],
+                ax=ax, 
+                label=col.replace('_output', ''),
+                color=style[0], # Use specified color
+                marker=self.scatter_marker, # Use simple dot marker
+                alpha=style[2], # Use specified alpha
+                s=style[1]  # Use specified size
+            )
+        
+        ax.set_title('Agreement Scatter Plot: Approximation Output vs. Reference Output')
+        ax.set_xlabel(f'Reference Output ({self.reference_col.replace("_output", "")})')
+        ax.set_ylabel('Approximation Output')
+        ax.set_xlim(plot_min, plot_max)
+        ax.set_ylim(plot_min, plot_max)
+        ax.set_aspect('equal', adjustable='box')
+        ax.legend(loc='upper left', fontsize='small')
 
-        padding = (max_y - min_y) * 0.05 # 5% padding
-        return min_y - padding, max_y + padding
+    # Function to insert a newline after a certain word/character or fixed length (e.g., 8 chars)
+    def wrap_label(self, label, max_length=10):
+        # A simple wrapping: insert newline if label is too long
+        if len(label) > max_length:
+                # Find the best split point (e.g., after the first word)
+                parts = label.split('_', 1)
+                if len(parts) > 1:
+                    return parts[0] + '-\n' + parts[1]
+                return label[:max_length] + '\n' + label[max_length:]
+        return label
 
-    def _plot_functions(self, ax: axes.Axes):
+    def _plot_covariance_heatmap(self, ax: axes.Axes):
         """
-        Plots each function's output on the given Axes object.
-
-        Assumes `self.x_values`, `self.function_columns`, and `self.df` are populated by `_load_data`.
-
-        Parameters
-        ----------
-        ax : matplotlib.axes.Axes
-            The Axes object on which to draw the plots.
+        Plots a correlation heatmap between all function outputs.
         """
-        # Assertions for static analysis and runtime safety
-        assert self.x_values is not None, "X values not loaded. Call _load_data() first."
-        assert self.function_columns is not None, "Function columns not prepared. Call _load_data() first."
-        assert self.df is not None, "DataFrame not loaded. Call _load_data() first."
+        assert self.df is not None and self.function_columns is not None
+        
+        # Calculate the Correlation Matrix (Correlation is robust against scale differences)
+        corr_matrix = self.df[self.function_columns].corr()
 
+        # Rename columns/index for cleaner labels
+        display_names = [col.replace('_output', '') for col in corr_matrix.columns]
+        corr_matrix.columns = display_names
+        corr_matrix.index = display_names
 
-        for i, col in enumerate(self.function_columns):
-            y_values = self.df[col]
-            
-            linestyle = self.linestyles[i % len(self.linestyles)]
-            color = self.colors[i % len(self.colors)]
-            
-            ax.plot(self.x_values, y_values,
-                    label=col.replace('_output', ''), # Clean up label for legend
-                    linestyle=linestyle,
-                    color=color,
-                    alpha=0.7, # Slightly transparent to see overlaps
-                   )
+        wrapped_x_labels = [self.wrap_label(name) for name in display_names]
+        wrapped_y_labels = [self.wrap_label(name) for name in display_names]
 
-    def _finalize_plot_layout(self, fig: figure.Figure, ax: axes.Axes, y_limits: Tuple[float, float]):
-        """
-        Applies final layout configurations to the plot.
+        # Use a high-contrast color map like 'rocket' or 'mako' for a clean, dark heatmap
+        sns.heatmap(
+            corr_matrix,
+            annot=True,              
+            fmt=".3f",               
+            # cmap='viridis',          
+            cbar_kws={'label': 'Correlation Coefficient'},
+            ax=ax,
+            linewidths=0.5,
+            linecolor='white',
+            vmin=-1.0, vmax=1.0 # Ensure full range for correlation
+        )
+        
+        # 1. Reduce the size of the x and y tick labels
+        # You may need to slightly increase labelsize from 5 if the heatmap is small.
+        ax.tick_params(axis='both', labelsize=7) 
+        ax.set_xticklabels(wrapped_x_labels, rotation=0, ha='center') 
+        ax.set_yticklabels(wrapped_y_labels, rotation=90, ha='center')
+        ax.set_title('Function Output Correlation Matrix (Covariance proxy)')
+        
+        # ax.set_xticklabels(ax.get_xticklabels(), rotation=0)
+        # ax.set_yticklabels(ax.get_yticklabels(), rotation=90)
+        ax.tick_params(axis='y', pad=12)
 
-        Parameters
-        ----------
-        fig : matplotlib.figure.Figure
-            The Figure object for tight layout.
-        ax : matplotlib.axes.Axes
-            The Axes object to configure.
-        y_limits : tuple[float, float]
-            The (min, max) limits for the y-axis.
-        """
-        ax.set_ylim(y_limits)
-        ax.set_title('Benchmark Function Outputs Comparison')
-        ax.set_xlabel('X Value')
-        ax.set_ylabel('Function Output')
-        ax.grid(True, linestyle='--', alpha=0.6)
-        ax.legend(loc='best', fontsize='small')
-        fig.tight_layout()
+        ax.set_title('Function Output Correlation Matrix (Covariance proxy)')
 
-    def _save_plot(self, fig: figure.Figure):
+    def _save_plot(self, fig: figure.Figure, plot_type: str):
         """
         Saves the generated plot to a PNG file and closes the figure.
-
-        Parameters
-        ----------
-        fig : matplotlib.figure.Figure
-            The Figure object to save.
         """
         os.makedirs(self.plots_dir, exist_ok=True)
-        # Adjust output filename: remove 'raw_' prefix and change extension to .png
-        output_filename = os.path.join(self.plots_dir, os.path.basename(self.csv_filepath).replace('raw_', '').replace('.csv', '.png'))
+        base_filename = os.path.basename(self.csv_filepath).replace('raw_', '').replace('.csv', '')
         
-        fig.savefig(output_filename, dpi=300) # Save with high resolution
-        print(f"Plot saved successfully to '{output_filename}'")
-        plt.close(fig) # Close the plot to free memory
+        # Generate specific filename based on plot_type
+        if plot_type == 'agreement':
+             output_filename = os.path.join(self.plots_dir, f'{base_filename}_agreement.png')
+        elif plot_type == 'covariance':
+             output_filename = os.path.join(self.plots_dir, f'{base_filename}_covariance.png')
+        else:
+             output_filename = os.path.join(self.plots_dir, f'{base_filename}_plot.png')
+
+        fig.savefig(output_filename, dpi=300, bbox_inches='tight') 
+        print(f"{plot_type.capitalize()} plot saved successfully to '{output_filename}'")
+        plt.close(fig) 
 
     def plot(self) -> bool:
         """
-        Orchestrates the entire plotting process.
-
-        This is the main public method to call to generate the plot.
-        It handles data loading, plotting, layout, and saving.
-
-        Returns
-        -------
-        bool
-            True if the plot is successfully generated and saved, False otherwise.
+        Orchestrates the entire multi-plot generation process into two separate files.
         """
         if not self._load_data():
             return False
 
-        # Data is guaranteed to be loaded if we reach here due to the return False above.
- 
-        fig: figure.Figure # Explicit type hint for fig
-        ax: axes.Axes      # Explicit type hint for ax
-        fig, ax = plt.subplots(figsize=(12, 8))
+        if not self.approximation_cols:
+             print("Error: No approximation columns found to compare against the reference.")
+             return False
         
-        y_limits = self._determine_y_limits()
-        self._plot_functions(ax)
-        self._finalize_plot_layout(fig, ax, y_limits)
-        
-        self._save_plot(fig)
+        # 1. AGREEMENT PLOT
+        fig_agree, ax_agree = plt.subplots(nrows=1, ncols=1, figsize=(10, 10))
+        self._plot_agreement(ax_agree)
+        fig_agree.tight_layout()
+        self._save_plot(fig_agree, 'agreement')
+
+        # 2. COVARIANCE HEATMAP
+        fig_covar, ax_covar = plt.subplots(nrows=1, ncols=1, figsize=(10, 8))
+        self._plot_covariance_heatmap(ax_covar)
+        fig_covar.tight_layout()
+        self._save_plot(fig_covar, 'covariance')
+
         return True
 
 if __name__ == '__main__':
