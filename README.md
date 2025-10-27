@@ -36,9 +36,9 @@ This project is in the **early experimental phase**. The current files and struc
 **Note:** To download the models used for benchmarking:
 
 ```bash
-wget https://huggingface.co/karpathy/tinyllamas/resolve/main/stories15M.bin
-
-wget https://huggingface.co/karpathy/tinyllamas/resolve/main/stories42M.bin
-
-wget https://huggingface.co/karpathy/tinyllamas/resolve/main/stories110M.bin
+cd llama2c/
+mkdir -p models
+wget -P models https://huggingface.co/karpathy/tinyllamas/resolve/main/stories15M.bin
+wget -P models https://huggingface.co/karpathy/tinyllamas/resolve/main/stories42M.bin
+wget -P models https://huggingface.co/karpathy/tinyllamas/resolve/main/stories110M.bin
 ```
