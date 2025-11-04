@@ -63,7 +63,7 @@ Each commit represents one logical, testable change. Use this structure:
 
 ### Commit Rules
 
-* The **subject line** must be **under 50 characters**.
+* The **subject line** must be under 72 characters.
 * Use **imperative mood** (“Add,” “Fix,” “Update”).
 * The **body** may explain *what* changed and *why*, when needed.
 * Wrap **body lines at 72 characters**.
