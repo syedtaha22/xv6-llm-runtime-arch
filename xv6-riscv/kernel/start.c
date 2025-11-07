@@ -4,8 +4,14 @@
 #include "riscv.h"
 #include "defs.h"
 
+#define FPU_DISABLE (0UL<<13) // FS = 00
+#define FPU_LAZY    (1UL<<13) // FS = 01
+#define FPU_ENABLE  (3UL<<13) // FS = 11
+
+
 void main();
 void timerinit();
+void fpu_init(uint64 mode);
 
 // entry.S needs one stack per CPU.
 __attribute__ ((aligned (16))) char stack0[4096 * NCPU];
@@ -44,9 +50,25 @@ start()
   int id = r_mhartid();
   w_tp(id);
 
+  fpu_init(FPU_ENABLE);
+
   // switch to supervisor mode and jump to main().
   asm volatile("mret");
 }
+
+void fpu_init(uint64 mode) {
+    uint64 s = r_sstatus();
+    // clear FS bits and set to mode
+    s &= ~(3UL << 13);
+    s |= mode;
+    w_sstatus(s);
+
+    // initialize FCSR if not disabled
+    if (mode != FPU_DISABLE)
+        w_fcsr(0);
+}
+
+
 
 // ask each hart to generate timer interrupts.
 void

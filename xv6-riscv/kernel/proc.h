@@ -77,6 +77,46 @@ struct trapframe {
   /* 264 */ uint64 t4;
   /* 272 */ uint64 t5;
   /* 280 */ uint64 t6;
+
+  // Floating point registers, 8 bytes each
+  // Probably a bad way to declare them like this
+  // But for now, it works
+  /* 288 */ uint64 f0;
+  /* 296 */ uint64 f1;
+  /* 304 */ uint64 f2;
+  /* 312 */ uint64 f3;
+  /* 320 */ uint64 f4;
+  /* 328 */ uint64 f5;
+  /* 336 */ uint64 f6;
+  /* 344 */ uint64 f7;
+  /* 352 */ uint64 f8;
+  /* 360 */ uint64 f9;
+  /* 368 */ uint64 f10;
+  /* 376 */ uint64 f11;
+  /* 384 */ uint64 f12;
+  /* 392 */ uint64 f13;
+  /* 400 */ uint64 f14;
+  /* 408 */ uint64 f15;
+  /* 416 */ uint64 f16;
+  /* 424 */ uint64 f17;
+  /* 432 */ uint64 f18;
+  /* 440 */ uint64 f19;
+  /* 448 */ uint64 f20;
+  /* 456 */ uint64 f21;
+  /* 464 */ uint64 f22;
+  /* 472 */ uint64 f23;
+  /* 480 */ uint64 f24;
+  /* 488 */ uint64 f25;
+  /* 496 */ uint64 f26;
+  /* 504 */ uint64 f27;
+  /* 512 */ uint64 f28;
+  /* 520 */ uint64 f29;
+  /* 528 */ uint64 f30;
+  /* 536 */ uint64 f31;
+
+  // fcsr - floating point control and status register
+  /* 544 */ uint64 fcsr;
+
 };
 
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
