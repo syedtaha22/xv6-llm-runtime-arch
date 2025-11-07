@@ -38,6 +38,26 @@ printint(int fd, long long xx, int base, int sgn)
     putc(fd, buf[i]);
 }
 
+// For doubles
+static void
+printdouble(int fd, double d) {
+  if (d < 0) {
+    putc(fd, '-');
+    d = -d;
+  }
+  long long intpart = (long long)d;
+  double fracpart = d - (double)intpart;
+  printint(fd, intpart, 10, 0);
+  putc(fd, '.');
+  // Print 6 digits of fractional part
+  for (int i = 0; i < 6; i++) {
+    fracpart *= 10;
+    int digit = (int)fracpart;
+    putc(fd, '0' + digit);
+    fracpart -= digit;
+  }
+}
+
 static void
 printptr(int fd, uint64 x) {
   int i;
@@ -100,6 +120,8 @@ vprintf(int fd, const char *fmt, va_list ap)
           s = "(null)";
         for(; *s; s++)
           putc(fd, *s);
+      } else if (c0 == 'f') {
+        printdouble(fd, va_arg(ap, double));
       } else if(c0 == '%'){
         putc(fd, '%');
       } else {
