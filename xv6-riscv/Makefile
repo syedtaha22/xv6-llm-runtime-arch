@@ -144,7 +144,7 @@ $K/%.o: $K/%.S
 tags: $(OBJS)
 	etags kernel/*.S kernel/*.c
 
-ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o
+ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o $U/math.o 
 
 ifeq ($(LAB),lock)
 ULIB += $U/statistics.o
@@ -197,6 +197,7 @@ UPROGS=\
 	$U/_forphan\
 	$U/_dorphan\
 	$U/_fputest\
+	$U/_mathtest\
 
 
 
