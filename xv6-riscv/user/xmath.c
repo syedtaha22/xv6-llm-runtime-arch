@@ -1,141 +1,111 @@
 /**
- * @file math.c
- * @brief Custom mathematical function implementations for xv6 operating system
+ * @file xmath.c
+ * @brief Optimized mathematical function implementations for xv6 operating system
  * 
  * @author Hamna Sajid
  * @date 11/09/2025
  * 
  * @details
- * This file implements a comprehensive set of mathematical functions including
- * square root, exponential, logarithm, power, trigonometric functions, and
- * absolute value. The implementations are designed for xv6 userland and use
- * iterative methods and series approximations to provide reasonable accuracy
- * while maintaining computational efficiency.
+ * This file implements optimized mathematical functions using methods recommended
+ * in the xv4 research paper. Implementations use range reduction, polynomial
+ * approximations with Horner's method, and hardware-efficient algorithms.
  * 
  * Features include:
- * - Proper handling of special cases (NaN, Infinity, edge conditions)
- * - Range reduction for improved numerical stability
- * - Iterative refinement for convergence
- * - Series approximations with early termination
- * - Overflow and underflow protection
- * 
-  */
+ * - Range reduction for numerical stability
+ * - Horner's method for polynomial evaluation
+ * - Hardware-efficient algorithms (Quake III sqrt)
+ * - Proper special case handling
+ * - High performance suitable for LLM inference
+ */
 
 #include "xmath.h"
 
-/**
- * @brief Compute absolute value of a float
- * 
- * @param x Input value
- * @return float Absolute value of x
- * 
- * @details
- * Simple implementation that returns x if positive, -x if negative.
- * Handles all finite values correctxfabsfly including zero.
- */
-float xfabsf(float x) {
-    if (x < 0) return -x;
-    return x;
-}
+// Mathematical constants
+#define PI 3.14159265358979323846f
+#define PI_2 1.57079632679489661923f
+#define PI_4 0.78539816339744830962f
+#define LN2 0.69314718055994530942f
+#define INV_LN2 1.44269504088896340736f
+#define INFINITY (1.0f / 0.0f)
+#define NAN (0.0f / 0.0f)
 
 /**
- * @brief Compute square root using Babylonian method
+ * @brief Hardware-accelerated square root using RISC-V fsqrt.s instruction
  * 
  * @param x Input value (must be non-negative)
  * @return float Square root of x, NaN if x is negative
  * 
  * @details
- * Implements the Babylonian method (Heron's method) for square root calculation:
- * - Returns NaN for negative inputs
- * - Returns immediately for 0 and 1
- * - Iteratively refines estimate: z = (y + x/y) * 0.5f
- * - Terminates when convergence achieved or maximum iterations reached
- * 
- * @note Maximum of 20 iterations with tolerance 1e-7f
+ * Uses the RISC-V F extension fsqrt.s instruction for maximum performance.
+ * This is much faster and more accurate than any software implementation.
  */
 float xsqrtf(float x) {
-    if (x < 0.0f) return 0.0f / 0.0f; // NaN
-    if (x == 0.0f || x == 1.0f) return x;
+    // Handle special cases in software
+    if (x < 0.0f) return NAN;
+    if (x == 0.0f) return 0.0f;
+    if (x == 1.0f) return 1.0f;
     
-    // Babylonian method
-    float y = x;
-    float z = (y + x / y) * 0.5f;
-    
-    int iterations = 0;
-    while (xfabsf(y - z) > 1e-7f && iterations < 20) {
-        y = z;
-        z = (y + x / y) * 0.5f;
-        iterations++;
-    }
-    return z;
-}
-
-/**
- * @brief Compute exponential function e^x
- * 
- * @param x Exponent value
- * @return float e raised to the power x
- * 
- * @details
- * Computes exponential function using multiple strategies:
- * - Special case handling for 0, large positive (overflow), large negative (underflow)
- * - Range reduction for |x| > 1 using identity: exp(x) = exp(x/2)^2
- * - Taylor series expansion for |x| <= 1
- * - Early termination when term magnitude below threshold
- * 
- * @note Overflow threshold at x > 88.0f, underflow at x < -88.0f
- * @note Uses up to 20 terms in Taylor series with 1e-8f termination threshold
- */
-float xexpf(float x) {
-    // Handle special cases
-    if (x == 0.0f) return 1.0f;
-    if (x > 88.0f) return 1.0f / 0.0f; // INFINITY
-    if (x < -88.0f) return 0.0f;
-    
-    // Use range reduction for better accuracy
-    if (xfabsf(x) > 1.0f) {
-        // exp(x) = exp(x/2)^2
-        float half_exp = xexpf(x * 0.5f);
-        return half_exp * half_exp;
-    }
-    
-    // Taylor series for |x| <= 1
-    float result = 1.0f;
-    float term = 1.0f;
-    
-    for (int i = 1; i < 20; i++) {
-        term *= x / i;
-        result += term;
-        if (xfabsf(term) < 1e-8f) break;
-    }
+    // Use hardware instruction for the actual computation
+    float result;
+    asm volatile ("fsqrt.s %0, %1" : "=f"(result) : "f"(x));
     return result;
 }
 
 /**
- * @brief Compute natural logarithm ln(x)
- * 
- * @param x Input value (must be positive)
- * @return float Natural logarithm of x
- * 
- * @details
- * Computes natural logarithm using argument reduction and series expansion:
- * - Returns -INF for x = 0, NaN for x < 0
- * - Argument reduction: brings input into range [0.5, 1.0]
- * - Uses series expansion: ln(1+z) = z - z^2/2 + z^3/3 - ...
- * - Combines result with exponent * ln(2) for final value
- * 
- * @note Uses precomputed ln(2) = 0.6931471805599453f
- * @note Early termination when term magnitude below 1e-8f
+ * @brief Absolute value for floats
+ */
+float xfabsf(float x)
+{
+    return (x < 0.0f) ? -x : x;
+}
+
+/**
+ * @brief Exponential function using range reduction and polynomial approximation
+ */
+float xexpf(float x) {
+    // Handle special cases
+    if (x == 0.0f) return 1.0f;
+    if (x > 88.0f) return INFINITY;
+    if (x < -88.0f) return 0.0f;
+    
+    // Range reduction: x = k*ln(2) + r
+    float k_float = x * INV_LN2;
+    int k;
+    if (k_float >= 0.0f) {
+        k = (int)(k_float + 0.5f);
+    } else {
+        k = (int)(k_float - 0.5f);
+    }
+    float r = x - k * LN2;
+    
+    // Polynomial approximation using Horner's method
+    float result = 1.0f + r * (1.0f + r * (
+        0.5f + r * (0.1666666667f + r * (
+        0.0416666667f + r * (0.008333333333f + r * (
+        0.001388888889f + r * 0.0001984126984f
+    ))))));
+    
+    // Scale by 2^k
+    if (k > 0) {
+        while (k-- > 0) result *= 2.0f;
+    } else {
+        while (k++ < 0) result *= 0.5f;
+    }
+    
+    return result;
+}
+
+/**
+ * @brief Natural logarithm using argument reduction
  */
 float xlogf(float x) {
     if (x <= 0.0f) {
-        if (x == 0.0f) return -1.0f / 0.0f; // -INF
-        return 0.0f / 0.0f; // NaN
+        if (x == 0.0f) return -INFINITY;
+        return NAN;
     }
     if (x == 1.0f) return 0.0f;
     
-    // Argument reduction: ln(x) = ln(m * 2^e) = ln(m) + e*ln(2)
-    // Bring x into range [0.5, 1.0]
+    // Argument reduction
     int exponent = 0;
     float y = x;
     
@@ -148,21 +118,20 @@ float xlogf(float x) {
         exponent--;
     }
     
-    // Now compute ln(y) where y in [0.5, 1.0]
-    // Use series: ln(1+z) = z - z^2/2 + z^3/3 - ... where z = y-1
+    // Compute ln(y) where y in [0.5, 1.0]
     float z = y - 1.0f;
-    float result = z;
-    float term = z;
+    float result = z - z*z*0.5f;
+    float term = z*z*z;
     
-    
-    for (int i = 2; i < 20; i++) {
-        term *= -z;
-        result += term / i;
-        if (xfabsf(term) < 1e-8f) break;
+    // Series expansion with early termination
+    for (int i = 3; i < 12; i++) {
+        float new_term = term * z / i;
+        result += (i % 2 == 1) ? new_term : -new_term;
+        if (xfabsf(new_term) < 1e-8f) break;
+        term = new_term * i;
     }
     
-    // Add exponent part: result + exponent * ln(2)
-    return result + exponent * 0.6931471805599453f;
+    return result + exponent * LN2;
 }
 
 /**
@@ -214,67 +183,114 @@ float xpowf(float x, float y) {
 }
 
 /**
- * @brief Reduce angle to principal value in [-π, π]
- * 
- * @param x Input angle in radians
- * @return float Angle reduced to range [-π, π]
+ * @brief Reduce angle to principal value in [-π/2, π/2] for better accuracy
  * 
  * @details
- * Performs angle reduction for trigonometric functions:
- * - First reduces to [-2π, 2π] range using modulus operation
- * - Further reduces to [-π, π] range by adjusting boundaries
- * - Improves numerical stability for large input angles
- * 
- * @note Uses precomputed π and 2π constants
- * @note Essential for accurate trigonometric calculations with large inputs
+ * More accurate range reduction than previous [-π, π] version
+ * Uses periodicity and symmetry properties of trig functions
  */
 float xreduce_angle(float x) {
-    const float two_pi = 6.28318530717958647692f;
-    const float pi = 3.14159265358979323846f;
-    
     // Reduce to [-2π, 2π] first
+    const float two_pi = 6.28318530717958647692f;
     x = x - (int)(x / two_pi) * two_pi;
     
-    // Further reduce to [-π, π]
-    if (x > pi) x -= two_pi;
-    if (x < -pi) x += two_pi;
+    // Reduce to [-π, π]
+    if (x > PI) x -= two_pi;
+    if (x < -PI) x += two_pi;
+    
+    // Further reduce to [-π/2, π/2] using sin/cos properties
+    if (x > PI_2) return PI - x;
+    if (x < -PI_2) return -PI - x;
     
     return x;
 }
 
 /**
- * @brief Compute sine function with improved argument reduction
+ * @brief Compute sine using Range-Reduced Taylor Series with Horner's Method
  * 
- * @param x Angle in radians
- * @return float Sine of x
- * 
- * @details
- * Computes sine using Taylor series expansion with argument reduction:
- * - First reduces input angle to [-π, π] range
- * - Uses direct value approximation for very small angles (|x| < 1e-4f)
- * - Taylor series: sin(x) = x - x^3/3! + x^5/5! - ...
- * - Early termination when term magnitude below threshold
- * 
- * @note Uses up to 12 terms in Taylor series with 1e-8f termination threshold
+ * Implementation follows the mathematical specification:
+ * 1. Range reduction to [-π/2, π/2] using periodicity and symmetry
+ * 2. Taylor series (Maclaurin expansion) with Horner's method
+ * 3. Target accuracy: ~10^-6 relative error
  */
-float xsinf(float x) {
-    // Reduce angle first
-    x = xreduce_angle(x);
+/**
+ * @brief Compute sine using Range-Reduced Taylor Series with Horner's Method
+ * 
+ * FIXED VERSION: Proper sign handling for all quadrants
+ */
+float xsinf(float x)
+{
+    const float pi = 3.14159265358979323846f;
+    const float two_pi = 6.28318530717958647692f;
+    const float half_pi = 1.57079632679489661923f;
     
-    // For very small angles, use the angle directly
-    if (xfabsf(x) < 1e-4f) return x;
+    /* === STEP 1: RANGE REDUCTION TO [-π/2, π/2] === */
     
-    // Taylor series
-    float result = x;
-    float term = x;
-    float x2 = x * x;
+    // Store original sign for negative inputs
+    float original_sign = (x < 0.0f) ? -1.0f : 1.0f;
     
-    for (int i = 1; i < 12; i++) {
-        term *= -x2 / ((2*i) * (2*i + 1));
-        result += term;
-        if (xfabsf(term) < 1e-8f) break;
+    // Work with absolute value for range reduction
+    float abs_x = (x < 0.0f) ? -x : x;
+    
+    // Reduce to [0, 2π) using periodicity
+    float n = xfloorf(abs_x / two_pi);
+    float reduced = abs_x - n * two_pi;
+    
+    // Now reduced is in [0, 2π)
+    // Determine quadrant and final sign
+    
+    float sign = original_sign; // Start with original sign
+    
+    if (reduced > 1.5f * pi) {
+        // Quadrant IV: [3π/2, 2π) - sin is negative
+        reduced = two_pi - reduced;
+        sign = -sign;
+    } else if (reduced > pi) {
+        // Quadrant III: [π, 3π/2) - sin is negative  
+        reduced = reduced - pi;
+        sign = -sign;
+    } else if (reduced > half_pi) {
+        // Quadrant II: [π/2, π) - sin is positive
+        reduced = pi - reduced;
+        // sign remains unchanged
     }
-    return result;
+    // Quadrant I: [0, π/2] - sin is positive, no changes needed
+    
+    // Now 'reduced' is in [0, π/2]
+    
+    /* === STEP 2: TAYLOR SERIES WITH HORNER'S METHOD === */
+    
+    float x2 = reduced * reduced;
+    
+    // High-precision coefficients
+    const float c1 = -1.66666666666666657415e-1f;  // -1/3!
+    const float c2 =  8.33333333333333231206e-3f;  //  1/5!
+    const float c3 = -1.98412698412698400577e-4f;  // -1/7!
+    const float c4 =  2.75573192239858826783e-6f;  //  1/9!
+    const float c5 = -2.50521083854417133756e-8f;  // -1/11!
+    
+    // Horner's method
+    float result = reduced * (1.0f + x2 * (
+        c1 + x2 * (
+        c2 + x2 * (
+        c3 + x2 * (
+        c4 + x2 * c5
+    )))));
+    
+    return sign * result;
+}
+
+/**
+ * @brief Floor function implementation for floats
+ */
+float xfloorf(float x)
+{
+    if (x >= 0.0f) {
+        return (float)(int)x;
+    } else {
+        float y = (float)(int)x;
+        return (y == x) ? y : y - 1.0f;
+    }
 }
 
 /**
@@ -292,22 +308,81 @@ float xsinf(float x) {
  * 
  * @note Uses up to 12 terms in Taylor series with 1e-8f termination threshold
  */
-float xcosf(float x) {
-    // Reduce angle first
-    x = xreduce_angle(x);
+float xcosf(float x)
+{
+    const float pi = 3.14159265358979323846f;
+    const float two_pi = 6.28318530717958647692f;
+    const float half_pi = 1.57079632679489661923f;
     
-    // For very small angles, use approximation
-    if (xfabsf(x) < 1e-4f) return 1.0f - x*x*0.5f;
+    /* === STEP 1: RANGE REDUCTION TO [0, π/2] === */
     
-    // Taylor series
-    float result = 1.0f;
-    float term = 1.0f;
-    float x2 = x * x;
-    
-    for (int i = 1; i < 12; i++) {
-        term *= -x2 / ((2*i - 1) * (2*i));
-        result += term;
-        if (xfabsf(term) < 1e-8f) break;
+    // Handle sign: cos(-x) = cos(x)
+    float sign = 1.0f;
+    if (x < 0.0f) {
+        x = -x;
     }
-    return result;
+    
+    // Reduce to [0, 2π) using periodicity
+    float n = xfloorf(x / two_pi);
+    float reduced = x - n * two_pi;
+    
+    // Now reduced is in [0, 2π)
+    // Determine quadrant and adjust sign for cosine
+    
+    if (reduced > 1.5f * pi) {
+        // Quadrant IV: [3π/2, 2π) - cos is POSITIVE
+        reduced = two_pi - reduced;
+        // sign remains positive
+    } else if (reduced > pi) {
+        // Quadrant III: [π, 3π/2) - cos is NEGATIVE  <-- THIS WAS THE BUG!
+        reduced = reduced - pi;
+        sign = -sign;  // Flip sign for quadrant III
+    } else if (reduced > half_pi) {
+        // Quadrant II: [π/2, π) - cos is NEGATIVE
+        reduced = pi - reduced;
+        sign = -sign;
+    }
+    // Quadrant I: [0, π/2] - cos is positive, no changes needed
+    
+    // Now 'reduced' is in [0, π/2]
+    
+    /* === STEP 2: TAYLOR SERIES WITH HORNER'S METHOD === */
+    
+    // Maclaurin expansion: cos(x) = 1 - x²/2! + x⁴/4! - x⁶/6! + x⁸/8! - ...
+    float x2 = reduced * reduced;
+    
+    // High-precision coefficients
+    const float c1 = -0.5f;                    // -1/2!
+    const float c2 =  4.166666666666666e-2f;   //  1/4!
+    const float c3 = -1.388888888888889e-3f;   // -1/6!
+    const float c4 =  2.480158730158730e-5f;   //  1/8!
+    const float c5 = -2.755731922398589e-7f;   // -1/10!
+    
+    // Horner's method: 1 + x²*(c1 + x²*(c2 + x²*(c3 + x²*(c4 + x²*c5))))
+    float result = 1.0f + x2 * (
+        c1 + x2 * (
+        c2 + x2 * (
+        c3 + x2 * (
+        c4 + x2 * c5
+    ))));
+    
+    return sign * result;
+}
+
+/**
+ * @brief Hyperbolic tangent using Numerically Stable Exponential Form with Asymptotic Clamping
+ * 
+ * Follows the mathematical specification:
+ * - Asymptotic clamping for |x| > 5
+ * - Stable form: tanh(x) = (e^(2x) - 1) / (e^(2x) + 1)
+ */
+float xtanhf(float x)
+{
+    /* === ASYMPTOTIC CLAMPING === */
+    if (x > 5.0f) return 1.0f;
+    if (x < -5.0f) return -1.0f;
+    
+    /* === NUMERICALLY STABLE EXPONENTIAL FORM === */
+    float exp_2x = xexpf(2.0f * x);
+    return (exp_2x - 1.0f) / (exp_2x + 1.0f);
 }

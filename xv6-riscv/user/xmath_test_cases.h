@@ -103,6 +103,10 @@ float sqrtf_inputs[] = {
     10.2004746525f,
     40.3163516714f,
     81.9603994360f,
+    2.0f,           // Common case
+    0.5f,           // Fractional input
+    1e-10f,         // Very small input
+    1e10f,          // Very large input
 };
 
 float sqrtf_expected[] = {
@@ -206,9 +210,13 @@ float sqrtf_expected[] = {
     3.1938181934f,
     6.3495158612f,
     9.0531982987f,
+    1.4142135624f,
+    0.7071067812f,
+    1e-5f,
+    1e5f,
 };
 
-const int sqrtf_count = 100;
+const int sqrtf_count = 104;  
 
 // expf test cases - 100 cases
 float expf_inputs[] = {
@@ -312,6 +320,10 @@ float expf_inputs[] = {
     2.6965624406f,
     -3.0086201722f,
     -3.5291129411f,
+    0.6931471806f,  // ln(2) - should give ~2.0
+    -0.6931471806f, // -ln(2) - should give ~0.5
+    10.0f,          // Moderate value
+    -10.0f,         // Moderate negative value
 };
 
 float expf_expected[] = {
@@ -415,9 +427,13 @@ float expf_expected[] = {
     14.8286695776f,
     0.0493597397f,
     0.0293309226f,
+    2.0000000000f,
+    0.5000000000f,
+    22026.4657948067f,
+    0.0000453999f,
 };
 
-const int expf_count = 100;
+const int expf_count = 104;
 
 // powf test cases - 100 cases
 float powf_inputs[] = {

@@ -146,6 +146,7 @@ tags: $(OBJS)
 
 ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o $U/xmath.o $U/testutil.o
 
+ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o $U/testutil.o $U/xmath.o 
 
 ifeq ($(LAB),lock)
 ULIB += $U/statistics.o
