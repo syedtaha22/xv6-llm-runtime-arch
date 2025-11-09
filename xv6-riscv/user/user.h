@@ -62,6 +62,9 @@ int statistics(void*, int);
 // printf.c
 void fprintf(int, const char*, ...) __attribute__ ((format (printf, 2, 3)));
 void printf(const char*, ...) __attribute__ ((format (printf, 1, 2)));
+void printf_set_indent(int);
+void printf_reset_indent(void);
+
 
 // umalloc.c
 void* malloc(uint);
