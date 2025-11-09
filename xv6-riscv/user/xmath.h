@@ -11,15 +11,15 @@
 typedef unsigned int uint32_t;
 
 // Math functions
-float sqrtf_new(float x);
-float expf_new(float x);
-float logf_new(float x);
-float powf_new(float x, float y);
-float sinf_new(float x);
-float cosf_new(float x);
-float fabsf_new(float x);
+float xsqrtf(float x);
+float xexpf(float x);
+float xlogf(float x);
+float xpowf(float x, float y);
+float xsinf(float x);
+float xcosf(float x);
+float xfabsf(float x);
 
 // Helper functions
-float reduce_angle(float x);
+float xreduce_angle(float x);
 
 #endif

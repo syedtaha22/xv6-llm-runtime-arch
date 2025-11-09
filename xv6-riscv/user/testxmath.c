@@ -2,10 +2,13 @@
  * @file test_math.c
  * @brief Comprehensive test suite for custom math library functions in xv6
  * 
+ * @author Hamna Sajid
+ * @date 11/09/2025
+ * 
  * @details
  * This file implements a comprehensive test suite for custom mathematical
  * functions implemented for the xv6 operating system. It tests functions
- * including sqrtf_new, expf_new, powf_new, sinf_new, cosf_new, and fabsf_new
+ * including xsqrtf, xexpf, xpowf, xsinf, xcosf, and xfabsf
  * against expected values with configurable error tolerances.
  * 
  * The test suite features:
@@ -15,15 +18,13 @@
  * - Multiple error metrics (absolute, relative)
  * - Comprehensive test case coverage
  * 
- * @author Hamna Sajid
- * @date 11/09/2025
  */
 
 #include "kernel/types.h"
 #include "user.h"
-#include "math.h"
-#include "testmath.h"
-#include "math_test_cases.h"
+#include "xmath.h"
+#include "testxmath.h"
+#include "xmath_test_cases.h"
 
 /** @brief ANSI Color Codes for terminal output */
 #define COLOR_RESET   "\033[0m"
@@ -134,7 +135,7 @@ void build_fail_message(char* buffer, int size, const char* func_name, int case_
     }
     
     // Add second input if provided (for powf)
-    if (input2 != 0.0f || strcmp(func_name, "powf_new") == 0) {
+    if (input2 != 0.0f || strcmp(func_name, "xpowf") == 0) {
         pos += strlen(strcpy(buffer + pos, ", "));
         
         if (pos < size - 50) {
@@ -352,7 +353,7 @@ int float_equals_rel(float a, float b, float epsilon)
         diff = -diff;
 
     // Use relative error for larger numbers, absolute for small
-    float magnitude = (fabsf_new(a) + fabsf_new(b)) * 0.5f;
+    float magnitude = (xfabsf(a) + xfabsf(b)) * 0.5f;
     if (magnitude < 1.0f)
     {
         return diff < epsilon;
@@ -413,7 +414,7 @@ void calculate_error_metrics(const char *func_name, int total_cases, int passed_
 }
 
 /**
- * @brief Test suite for sqrtf_new function
+ * @brief Test suite for xsqrtf function
  * 
  * @details
  * Tests the custom square root implementation against a comprehensive set
@@ -422,7 +423,7 @@ void calculate_error_metrics(const char *func_name, int total_cases, int passed_
  */
 void test_sqrtf()
 {
-    printf(COLOR_BOLD "Testing sqrtf_new - Comprehensive Test Suite" COLOR_RESET "\n");
+    printf(COLOR_BOLD "Testing xsqrtf - Comprehensive Test Suite" COLOR_RESET "\n");
     int passed = 0;
     float max_error = 0.0f;
     float total_error = 0.0f;
@@ -432,7 +433,7 @@ void test_sqrtf()
     {
         float input = sqrtf_inputs[i];
         float expected = sqrtf_expected[i];
-        float result = sqrtf_new(input);
+        float result = xsqrtf(input);
 
         // Handle NaN and Infinity cases
         if (is_nan(expected) && is_nan(result))
@@ -449,7 +450,7 @@ void test_sqrtf()
         // Calculate error for finite cases
         if (is_finite(expected) && is_finite(result))
         {
-            float error = fabsf_new(result - expected);
+            float error = xfabsf(result - expected);
             if (error > max_error)
                 max_error = error;
             total_error += error;
@@ -501,7 +502,7 @@ void test_sqrtf()
 }
 
 /**
- * @brief Test suite for expf_new function
+ * @brief Test suite for xexpf function
  * 
  * @details
  * Tests the custom exponential function implementation. Uses relative error
@@ -510,7 +511,7 @@ void test_sqrtf()
  */
 void test_expf()
 {
-    printf(COLOR_BOLD "Testing expf_new - Comprehensive Test Suite" COLOR_RESET "\n");
+    printf(COLOR_BOLD "Testing xexpf - Comprehensive Test Suite" COLOR_RESET "\n");
     int passed = 0;
     float max_error = 0.0f;
     float total_error = 0.0f;
@@ -520,7 +521,7 @@ void test_expf()
     {
         float input = expf_inputs[i];
         float expected = expf_expected[i];
-        float result = expf_new(input);
+        float result = xexpf(input);
 
         // Handle infinity cases
         if (expected > 1e10f && result > 1e10f)
@@ -539,7 +540,7 @@ void test_expf()
         // Calculate error for finite cases
         if (expected < 1e10f && result < 1e10f)
         {
-            float error = fabsf_new(result - expected);
+            float error = xfabsf(result - expected);
             if (error > max_error)
                 max_error = error;
             total_error += error;
@@ -586,7 +587,7 @@ void test_expf()
 }
 
 /**
- * @brief Test suite for powf_new function
+ * @brief Test suite for xpowf function
  * 
  * @details
  * Tests the custom power function implementation. Uses relative error
@@ -595,7 +596,7 @@ void test_expf()
  */
 void test_powf()
 {
-    printf(COLOR_BOLD "Testing powf_new - Comprehensive Test Suite" COLOR_RESET "\n");
+    printf(COLOR_BOLD "Testing xpowf - Comprehensive Test Suite" COLOR_RESET "\n");
     int passed = 0;
     float max_error = 0.0f;
     float total_error = 0.0f;
@@ -606,7 +607,7 @@ void test_powf()
         float base = powf_inputs[i * 2];
         float exponent = powf_inputs[i * 2 + 1];
         float expected = powf_expected[i];
-        float result = powf_new(base, exponent);
+        float result = xpowf(base, exponent);
 
         // Handle NaN and Infinity cases
         if (is_nan(expected) && is_nan(result))
@@ -624,8 +625,8 @@ void test_powf()
         if (is_finite(expected) && is_finite(result))
         {
             // Use relative error for powf
-            float error = fabsf_new(result - expected);
-            float rel_error = (expected != 0) ? error / fabsf_new(expected) : error;
+            float error = xfabsf(result - expected);
+            float rel_error = (expected != 0) ? error / xfabsf(expected) : error;
 
             if (rel_error > max_error)
                 max_error = rel_error;
@@ -679,7 +680,7 @@ void test_powf()
 }
 
 /**
- * @brief Test suite for sinf_new function
+ * @brief Test suite for xsinf function
  * 
  * @details
  * Tests the custom sine function implementation. Uses absolute error
@@ -688,7 +689,7 @@ void test_powf()
  */
 void test_sinf()
 {
-    printf(COLOR_BOLD "Testing sinf_new - Comprehensive Test Suite" COLOR_RESET "\n");
+    printf(COLOR_BOLD "Testing xsinf - Comprehensive Test Suite" COLOR_RESET "\n");
     int passed = 0;
     float max_error = 0.0f;
     float total_error = 0.0f;
@@ -698,17 +699,17 @@ void test_sinf()
     {
         float input = sinf_inputs[i];
         float expected = sinf_expected[i];
-        float result = sinf_new(input);
+        float result = xsinf(input);
 
         // For sinf, we care about absolute error
-        float error = fabsf_new(result - expected);
+        float error = xfabsf(result - expected);
         if (error > max_error)
             max_error = error;
         total_error += error;
         valid_cases++;
 
         // Use more lenient threshold for large angles
-        float threshold = (fabsf_new(input) > 100.0f) ? 1e-3f : 1e-5f;
+        float threshold = (xfabsf(input) > 100.0f) ? 1e-3f : 1e-5f;
 
         if (error < threshold)
         {
@@ -739,16 +740,16 @@ void test_sinf()
 }
 
 /**
- * @brief Test suite for cosf_new function
+ * @brief Test suite for xcosf function
  * 
  * @details
- * Tests the custom cosine function implementation. Similar to sinf_new
+ * Tests the custom cosine function implementation. Similar to xsinf
  * testing but with cosine-specific test cases. Uses adaptive error
  * thresholds based on input magnitude.
  */
 void test_cosf()
 {
-    printf(COLOR_BOLD "Testing cosf_new - Comprehensive Test Suite" COLOR_RESET "\n");
+    printf(COLOR_BOLD "Testing xcosf - Comprehensive Test Suite" COLOR_RESET "\n");
     int passed = 0;
     float max_error = 0.0f;
     float total_error = 0.0f;
@@ -758,16 +759,16 @@ void test_cosf()
     {
         float input = cosf_inputs[i];
         float expected = cosf_expected[i];
-        float result = cosf_new(input);
+        float result = xcosf(input);
 
-        float error = fabsf_new(result - expected);
+        float error = xfabsf(result - expected);
         if (error > max_error)
             max_error = error;
         total_error += error;
         valid_cases++;
 
         // Use more lenient threshold for large angles
-        float threshold = (fabsf_new(input) > 100.0f) ? 1e-3f : 1e-5f;
+        float threshold = (xfabsf(input) > 100.0f) ? 1e-3f : 1e-5f;
 
         if (error < threshold)
         {
@@ -798,7 +799,7 @@ void test_cosf()
 }
 
 /**
- * @brief Test suite for fabsf_new function
+ * @brief Test suite for xfabsf function
  * 
  * @details
  * Tests the custom absolute value function implementation. Uses simple
@@ -807,7 +808,7 @@ void test_cosf()
  */
 void test_fabsf()
 {
-    printf(COLOR_BOLD "Testing fabsf_new" COLOR_RESET "\n");
+    printf(COLOR_BOLD "Testing xfabsf" COLOR_RESET "\n");
     int passed = 0;
 
     float test_cases[][2] = {
@@ -826,7 +827,7 @@ void test_fabsf()
     {
         float input = test_cases[i][0];
         float expected = test_cases[i][1];
-        float result = fabsf_new(input);
+        float result = xfabsf(input);
 
         if (result == expected || (result == 0.0f && expected == 0.0f))
         {

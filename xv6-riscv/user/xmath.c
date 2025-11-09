@@ -2,6 +2,9 @@
  * @file math.c
  * @brief Custom mathematical function implementations for xv6 operating system
  * 
+ * @author Hamna Sajid
+ * @date 11/09/2025
+ * 
  * @details
  * This file implements a comprehensive set of mathematical functions including
  * square root, exponential, logarithm, power, trigonometric functions, and
@@ -16,11 +19,9 @@
  * - Series approximations with early termination
  * - Overflow and underflow protection
  * 
- * @author Hamna Sajid
- * @date 11/09/2025
- */
+  */
 
-#include "math.h"
+#include "xmath.h"
 
 /**
  * @brief Compute absolute value of a float
@@ -30,9 +31,9 @@
  * 
  * @details
  * Simple implementation that returns x if positive, -x if negative.
- * Handles all finite values correctly including zero.
+ * Handles all finite values correctxfabsfly including zero.
  */
-float fabsf_new(float x) {
+float xfabsf(float x) {
     if (x < 0) return -x;
     return x;
 }
@@ -52,7 +53,7 @@ float fabsf_new(float x) {
  * 
  * @note Maximum of 20 iterations with tolerance 1e-7f
  */
-float sqrtf_new(float x) {
+float xsqrtf(float x) {
     if (x < 0.0f) return 0.0f / 0.0f; // NaN
     if (x == 0.0f || x == 1.0f) return x;
     
@@ -61,7 +62,7 @@ float sqrtf_new(float x) {
     float z = (y + x / y) * 0.5f;
     
     int iterations = 0;
-    while (fabsf_new(y - z) > 1e-7f && iterations < 20) {
+    while (xfabsf(y - z) > 1e-7f && iterations < 20) {
         y = z;
         z = (y + x / y) * 0.5f;
         iterations++;
@@ -85,16 +86,16 @@ float sqrtf_new(float x) {
  * @note Overflow threshold at x > 88.0f, underflow at x < -88.0f
  * @note Uses up to 20 terms in Taylor series with 1e-8f termination threshold
  */
-float expf_new(float x) {
+float xexpf(float x) {
     // Handle special cases
     if (x == 0.0f) return 1.0f;
     if (x > 88.0f) return 1.0f / 0.0f; // INFINITY
     if (x < -88.0f) return 0.0f;
     
     // Use range reduction for better accuracy
-    if (fabsf_new(x) > 1.0f) {
+    if (xfabsf(x) > 1.0f) {
         // exp(x) = exp(x/2)^2
-        float half_exp = expf_new(x * 0.5f);
+        float half_exp = xexpf(x * 0.5f);
         return half_exp * half_exp;
     }
     
@@ -105,7 +106,7 @@ float expf_new(float x) {
     for (int i = 1; i < 20; i++) {
         term *= x / i;
         result += term;
-        if (fabsf_new(term) < 1e-8f) break;
+        if (xfabsf(term) < 1e-8f) break;
     }
     return result;
 }
@@ -126,7 +127,7 @@ float expf_new(float x) {
  * @note Uses precomputed ln(2) = 0.6931471805599453f
  * @note Early termination when term magnitude below 1e-8f
  */
-float logf_new(float x) {
+float xlogf(float x) {
     if (x <= 0.0f) {
         if (x == 0.0f) return -1.0f / 0.0f; // -INF
         return 0.0f / 0.0f; // NaN
@@ -157,7 +158,7 @@ float logf_new(float x) {
     for (int i = 2; i < 20; i++) {
         term *= -z;
         result += term / i;
-        if (fabsf_new(term) < 1e-8f) break;
+        if (xfabsf(term) < 1e-8f) break;
     }
     
     // Add exponent part: result + exponent * ln(2)
@@ -182,7 +183,7 @@ float logf_new(float x) {
  * 
  * @note Uses absolute value of base for logarithm to handle negative bases properly
  */
-float powf_new(float x, float y) {
+float xpowf(float x, float y) {
     // Handle special cases
     if (y == 0.0f) return 1.0f;
     if (x == 1.0f) return 1.0f;
@@ -192,7 +193,7 @@ float powf_new(float x, float y) {
     }
     
     // pow(x,y) = exp(y * ln(|x|))
-    float result = expf_new(y * logf_new(fabsf_new(x)));
+    float result = xexpf(y * xlogf(xfabsf(x)));
     
     // Handle negative base with integer exponent
     if (x < 0.0f) {
@@ -227,7 +228,7 @@ float powf_new(float x, float y) {
  * @note Uses precomputed π and 2π constants
  * @note Essential for accurate trigonometric calculations with large inputs
  */
-float reduce_angle(float x) {
+float xreduce_angle(float x) {
     const float two_pi = 6.28318530717958647692f;
     const float pi = 3.14159265358979323846f;
     
@@ -256,12 +257,12 @@ float reduce_angle(float x) {
  * 
  * @note Uses up to 12 terms in Taylor series with 1e-8f termination threshold
  */
-float sinf_new(float x) {
+float xsinf(float x) {
     // Reduce angle first
-    x = reduce_angle(x);
+    x = xreduce_angle(x);
     
     // For very small angles, use the angle directly
-    if (fabsf_new(x) < 1e-4f) return x;
+    if (xfabsf(x) < 1e-4f) return x;
     
     // Taylor series
     float result = x;
@@ -271,7 +272,7 @@ float sinf_new(float x) {
     for (int i = 1; i < 12; i++) {
         term *= -x2 / ((2*i) * (2*i + 1));
         result += term;
-        if (fabsf_new(term) < 1e-8f) break;
+        if (xfabsf(term) < 1e-8f) break;
     }
     return result;
 }
@@ -291,12 +292,12 @@ float sinf_new(float x) {
  * 
  * @note Uses up to 12 terms in Taylor series with 1e-8f termination threshold
  */
-float cosf_new(float x) {
+float xcosf(float x) {
     // Reduce angle first
-    x = reduce_angle(x);
+    x = xreduce_angle(x);
     
     // For very small angles, use approximation
-    if (fabsf_new(x) < 1e-4f) return 1.0f - x*x*0.5f;
+    if (xfabsf(x) < 1e-4f) return 1.0f - x*x*0.5f;
     
     // Taylor series
     float result = 1.0f;
@@ -306,7 +307,7 @@ float cosf_new(float x) {
     for (int i = 1; i < 12; i++) {
         term *= -x2 / ((2*i - 1) * (2*i));
         result += term;
-        if (fabsf_new(term) < 1e-8f) break;
+        if (xfabsf(term) < 1e-8f) break;
     }
     return result;
 }
