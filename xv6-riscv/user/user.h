@@ -3,6 +3,9 @@ typedef unsigned long size_t;
 typedef long int off_t;
 #endif
 
+//for variable argument functions (sprintf, sscanf)
+#include<stdarg.h>
+
 #define SBRK_ERROR ((char *)-1)
 
 struct stat;
@@ -55,6 +58,13 @@ int memcmp(const void *, const void *, uint);
 void *memcpy(void *, const void *, uint);
 char* sbrk(int);
 char* sbrklazy(int);
+// String utility prototypes for milestone 2
+int xsprintf(char *out, const char *fmt, ...);
+int xsnprintf(char *out, int size, const char *fmt, ...);
+int xvsnprintf(char *out, int size, const char *fmt, va_list ap);
+int xsscanf(const char *s, const char *fmt, ...);
+int xisprint(int c);
+int xisspace(int c);
 #ifdef LAB_LOCK
 int statistics(void*, int);
 #endif
