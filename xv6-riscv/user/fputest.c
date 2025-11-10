@@ -496,7 +496,6 @@ int main(int argc, char** argv) {
   // Set indentation if provided. usage fputest <level>
   if (argc == 2) {
     int indent = atoi(argv[1]);
-    printf("Setting indent level to %d\n", indent);
     printf_set_indent(indent);
   }
 
