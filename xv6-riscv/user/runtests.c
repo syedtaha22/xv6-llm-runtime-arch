@@ -28,6 +28,7 @@
 char *tests[] = {
   "fputest",
   "testxstdlib",
+  "testxmath",
   0   // null-terminated
 };
 
@@ -59,7 +60,7 @@ int main(void) {
 
     if(pid == 0){
       // Child: prepare argv for xv6 exec
-      char *argv[3] = { test, "4", 0 }; // indent level 4
+      char *argv[2] = { test, 0 };
       exec(test, argv);
 
       // If exec fails
