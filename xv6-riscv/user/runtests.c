@@ -27,6 +27,7 @@
  */
 char *tests[] = {
   "fputest",
+  "testxstdlib",
   0   // null-terminated
 };
 

@@ -144,7 +144,7 @@ $K/%.o: $K/%.S
 tags: $(OBJS)
 	etags kernel/*.S kernel/*.c
 
-ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o $U/testutil.o
+ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o $U/testutil.o $U/xstdlib.o
 
 ifeq ($(LAB),lock)
 ULIB += $U/statistics.o
@@ -160,6 +160,9 @@ $U/usys.S : $U/usys.pl
 
 $U/usys.o : $U/usys.S
 	$(CC) $(CFLAGS) -c -o $U/usys.o $U/usys.S
+
+$U/xstdlib.o: $U/xstdlib.c $U/xstdlib.h
+	$(CC) $(CFLAGS) -c -o $U/xstdlib.o $U/xstdlib.c
 
 $U/_forktest: $U/forktest.o $(ULIB)
 	# forktest has less library code linked in - needs to be small
@@ -198,6 +201,7 @@ UPROGS=\
 	$U/_dorphan\
 	$U/_fputest\
 	$U/_runtests\
+	$U/_testxstdlib\
 
 
 
