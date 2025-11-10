@@ -45,6 +45,10 @@ void fail(int level, const char *msg) {
   exit(1);
 }
 
+void failnoex(int level, const char *msg) {
+  print_colored(level, msg, "FAIL", ANSI_RED);
+}
+
 void pass(int level, const char *msg) {
   print_colored(level, msg, "PASS", ANSI_GREEN);
 }

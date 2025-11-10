@@ -36,6 +36,15 @@ void set_tag(const char *tag);
 void fail(int level, const char *msg);
 
 /**
+ * @brief Print a failure message (in red) without exiting.
+ * 
+ * @param level Indentation level (number of spaces before the tag).
+ * @param msg Null-terminated description string.
+ */
+void failnoex(int level, const char *msg);
+
+
+/**
  * @brief Print a success message (in green).
  * @param level Indentation level (number of spaces before the tag).
  * @param msg Null-terminated description string.
