@@ -125,3 +125,35 @@ struct dns_data {
   uint32 ttl;
   uint16 len;
 } __attribute__((packed));
+
+
+/**
+ * @brief Maximum number of UDP ports supported by the network stack
+ * @author Syed Taha
+ * @date 2024
+ * 
+ * @details
+ * Defines the total number of UDP ports available in the system, spanning the complete
+ * IANA-defined port range from 0 to 65535. This encompasses:
+ * - Well-known ports: 0-1023 (system services and privileged applications)
+ * - Registered ports: 1024-49151 (user applications and services)  
+ * - Dynamic/private ports: 49152-65535 (ephemeral client connections)
+ * 
+ * The value 65536 represents the total number of distinct port numbers available
+ * in the 16-bit UDP port field (2^16 = 65536 possible values).
+ * 
+ * This constant is used to size the udp_ports array that tracks port allocation
+ * state and manages packet queues for each potential UDP port:
+ * - struct udp_port udp_ports[UDP_PORTS]
+ * - Provides O(1) access to any port's state and packet queue
+ * - Enables efficient port validation (port < UDP_PORTS)
+ * 
+ * @note Port 0 is technically valid but rarely used in practice, as it typically
+ * indicates an ephemeral port assignment by the operating system.
+ * 
+ * @remark
+ * While a sparse data structure might conserve memory for typically unused ports,
+ * the array approach provides simplicity and constant-time access crucial for
+ * network performance. The memory overhead is acceptable for the xv6 environment.
+ */
+#define UDP_PORTS 65536
