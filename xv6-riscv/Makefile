@@ -91,6 +91,8 @@ OBJDUMP = $(TOOLPREFIX)objdump
 CFLAGS = -Wall -Werror -O -fno-omit-frame-pointer -ggdb -gdwarf-2
 CFLAGS = -Wall -Werror -Wno-unknown-attributes -O -fno-omit-frame-pointer -ggdb -gdwarf-2
 
+XCFLAGS += -DSOL_COW -DLAB_COW
+
 ifdef LAB
 LABUPPER = $(shell echo $(LAB) | tr a-z A-Z)
 XCFLAGS += -DSOL_$(LABUPPER) -DLAB_$(LABUPPER)
@@ -238,10 +240,7 @@ UPROGS += \
 	$U/_lazytests
 endif
 
-ifeq ($(LAB),cow)
-UPROGS += \
-	$U/_cowtest
-endif
+UPROGS += $U/_cowtest
 
 ifeq ($(LAB),thread)
 UPROGS += \
