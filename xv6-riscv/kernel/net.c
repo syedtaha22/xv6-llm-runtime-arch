@@ -20,7 +20,7 @@ static uint8 host_mac[ETHADDR_LEN] = { 0x52, 0x55, 0x0a, 0x00, 0x02, 0x02 };
 /**
  * @brief Kernel-internal structure for queuing received UDP datagrams awaiting application consumption
  * @author Syed Taha
- * @date 2024
+ * @date 12th November 2025
  * 
  * @details
  * Represents a received UDP datagram that has been processed by the network stack and is 
@@ -65,7 +65,7 @@ struct udp_packet {
 /**
  * @brief Internal kernel structure managing the state and receive queue for a UDP port
  * @author Syed Taha
- * @date 2024
+ * @date 12th November 2025
  * 
  * @details
  * This structure represents the kernel's per-port state for UDP communication. Each
@@ -99,7 +99,7 @@ struct udp_port {
 /**
  * @brief Global array tracking all possible UDP ports in the system
  * @author Syed Taha  
- * @date 2024
+ * @date 12th November 2025
  * 
  * @details
  * This static array provides O(1) access to the state of any UDP port by using the
@@ -144,7 +144,7 @@ netinit(void)
 /**
  * @brief System call implementation for binding a UDP port to receive datagrams
  * @author Syed Taha
- * @date 2024
+ * @date 12th November 2025
  * 
  * @details
  * Implements the bind() system call that allows a user process to claim exclusive
@@ -173,9 +173,7 @@ netinit(void)
  * 
  * @note Port 0 binding is permitted but represents an ephemeral port assignment
  * in standard UDP semantics, though xv6 treats it as a normal port.
- * 
  */
-
 uint64
 sys_bind(void)
 {
@@ -233,7 +231,7 @@ sys_bind(void)
 /**
  * @brief System call implementation for unbinding a UDP port and releasing resources
  * @author Syed Taha
- * @date 2024
+ * @date 12th November 2025
  * 
  * @details
  * Implements the unbind() system call that releases a previously bound UDP port and
@@ -345,7 +343,7 @@ sys_unbind(void)
 /**
  * @brief System call implementation for receiving UDP datagrams from a bound port
  * @author Syed Taha
- * @date 2024
+ * @date 12th November 2025
  * 
  * @details
  * Implements the recv() system call that retrieves UDP datagrams from a previously
@@ -614,7 +612,7 @@ sys_send(void)
 /**
  * @brief IP packet receiver and UDP demultiplexer
  * @author Syed Taha
- * @date 2024
+ * @date 12th November 2025
  * 
  * @details
  * Processes incoming IP packets from the network stack, specifically handling UDP

@@ -93,7 +93,7 @@ e1000_init(uint32 *xregs)
 /**
  * @brief Transmit an Ethernet frame using the E1000 network interface controller
  * @author Syed Taha
- * @date 2024
+ * @date 12th November 2025
  * 
  * @details
  * This function programs a complete Ethernet frame into the transmit descriptor ring
@@ -203,7 +203,7 @@ e1000_transmit(char *buf, int len)
 /**
  * @brief Process received packets from the E1000 network interface controller
  * @author Syed Taha
- * @date 2024
+ * @date 12th November 2025
  * 
  * @details
  * This interrupt-driven function handles incoming network packets by processing the receive

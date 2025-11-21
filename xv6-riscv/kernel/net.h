@@ -130,7 +130,7 @@ struct dns_data {
 /**
  * @brief Maximum number of UDP ports supported by the network stack
  * @author Syed Taha
- * @date 2024
+ * @date 12th November 2025
  * 
  * @details
  * Defines the total number of UDP ports available in the system, spanning the complete
