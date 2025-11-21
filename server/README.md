@@ -1,6 +1,6 @@
-# Task 7: Python File Server Implementation
+# Python File Server Implementation
 
-**Date:** November 21, 2025
+**Date:** 21th November, 2025
 
 ## Overview
 
