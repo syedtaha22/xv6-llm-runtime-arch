@@ -206,6 +206,7 @@ UPROGS=\
 	$U/_testxstdlib\
 	$U/_testxmath\
 	$U/_testxstrlib\
+	$U/_udp_client\
 
 
 
