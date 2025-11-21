@@ -41,7 +41,8 @@ void sha256_transform(SHA256_CTX *ctx, const BYTE data[]) {
            (data[j+1] << 16) |
            (data[j+2] <<  8) |
            (data[j+3]);
-   
+  }
+  
   // Step 2: Expand to 64 words
   for (; i < 64; ++i) {
     m[i] = SIG1(m[i-2]) + m[i-7] + SIG0(m[i-15]) + m[i-16];
