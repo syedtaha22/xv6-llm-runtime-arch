@@ -1,9 +1,44 @@
+/**
+ * @file udp_client.c
+ * @brief User-space UDP client for fetching files from the LLM UDP server.
+ * @author Hamna Sajid
+ * @date 22nd November 2025
+ *
+ * @details
+ * Implements a simple application-level protocol over UDP used to fetch
+ * large files (model weights, tokenizer) from a remote server. The client
+ * performs three main operations:
+ *  - META_REQ / META_RESP to learn file size, chunk count and expected SHA-256
+ *  - DATA_RANGE_REQ to request contiguous ranges of chunks
+ *  - RETRANS_REQ to explicitly request retransmission of missing chunks
+ *
+ * The client reassembles the file from fixed-size chunks, verifies integrity
+ * with SHA-256, and returns an allocated buffer containing the file on
+ * success. This module is intended to run inside xv6 userland for testing
+ * the kernel UDP facilities.
+ */
+
 #include "types.h"
 #include "user.h"
 #include "udp_client.h"
 #include "sha256.h"
 
-// Transfer context structure
+/**
+ * @struct transfer_ctx_t
+ * @brief Context tracking an in-progress file transfer.
+ *
+ * @details
+ * Holds the per-transfer mutable state:
+ * - file_buf: malloc'd reassembly buffer for the whole file
+ * - received: a per-chunk bitmap (one byte per chunk, 1 = received)
+ * - file_size: total file size in bytes
+ * - total_chunks: number of chunks expected
+ * - file_sha256: expected SHA-256 digest (32 bytes)
+ *
+ * Memory lifecycle:
+ * - Allocated by llm_fetch_file()
+ * - Freed by caller after successful completion
+ */
 typedef struct {
     char *file_buf;           // malloc'd buffer for file data
     char *received;           // bitmap: 1 = chunk received, 0 = missing
@@ -12,7 +47,14 @@ typedef struct {
     unsigned char file_sha256[32];  // Expected SHA-256
 } transfer_ctx_t;
 
-// Helper function to check if all chunks are received
+/**
+ * @brief Check whether all chunks in a transfer context have been received.
+ * @param ctx Pointer to transfer_ctx_t describing the transfer state.
+ * @return 1 if all chunks are received, 0 otherwise.
+ *
+ * @note Simple linear scan of the received bitmap. Used to determine
+ *       whether transfer is complete.
+ */
 static int all_chunks_received(transfer_ctx_t *ctx) {
     for (int i = 0; i < ctx->total_chunks; i++) {
         if (!ctx->received[i]) {
@@ -22,7 +64,15 @@ static int all_chunks_received(transfer_ctx_t *ctx) {
     return 1;
 }
 
-// Count missing chunks in a range
+/**
+ * @brief Count how many chunks are missing in [start, end).
+ * @param ctx Pointer to transfer_ctx_t.
+ * @param start Inclusive start index.
+ * @param end Exclusive end index.
+ * @return Number of missing chunks inside the given range.
+ *
+ * @note Range is clipped against total_chunks.
+ */
 static int count_missing_in_range(transfer_ctx_t *ctx, uint32_t start, uint32_t end) {
     int count = 0;
     for (uint32_t i = start; i < end && i < ctx->total_chunks; i++) {
@@ -33,7 +83,16 @@ static int count_missing_in_range(transfer_ctx_t *ctx, uint32_t start, uint32_t 
     return count;
 }
 
-// Get missing chunk indices in a range
+/**
+ * @brief Populate an indices array with up to MAX_RETRANS missing chunk indices.
+ * @param ctx Pointer to transfer_ctx_t.
+ * @param start Inclusive start index.
+ * @param end Exclusive end index.
+ * @param indices Preallocated array to receive missing indices (caller-supplied).
+ * @param count Out parameter set to the number of indices written.
+ *
+ * @details Writes at most MAX_RETRANS indices. Clips the search to total_chunks.
+ */
 static void get_missing_in_range(transfer_ctx_t *ctx, uint32_t start, uint32_t end, 
                                 uint32_t *indices, int *count) {
     *count = 0;
@@ -44,7 +103,6 @@ static void get_missing_in_range(transfer_ctx_t *ctx, uint32_t start, uint32_t e
     }
 }
 
-// Send META_REQ and parse META_RESP
 int llm_meta_request(uint8_t file_id, uint32_t *file_size, uint32_t *total_chunks, unsigned char *file_hash) {
     // Bind to a random port
     short port = 10000 + (getpid() % 1000); // Use PID to get somewhat unique port
@@ -90,7 +148,6 @@ int llm_meta_request(uint8_t file_id, uint32_t *file_size, uint32_t *total_chunk
     return 0;
 }
 
-// Send DATA_RANGE_REQ
 int llm_data_range_request(uint8_t file_id, uint32_t start_idx, uint16_t count) {
     short port = 10000 + (getpid() % 1000);
     
@@ -117,7 +174,7 @@ int llm_data_range_request(uint8_t file_id, uint32_t start_idx, uint16_t count) 
     return 0;
 }
 
-// Send RETRANS_REQ for specific chunk indices
+
 int llm_retrans_request(uint8_t file_id, uint32_t *indices, uint16_t count) {
     short port = 10000 + (getpid() % 1000);
     
@@ -154,7 +211,19 @@ int llm_retrans_request(uint8_t file_id, uint32_t *indices, uint16_t count) {
     return 0;
 }
 
-// Process incoming DATA_PACKET
+/**
+ * @brief Parse and process a received DATA_PACKET into transfer context buffer.
+ * @param ctx Pointer to the transfer context.
+ * @param packet Raw packet bytes received from recv().
+ * @param len Length of the received packet in bytes.
+ * @return -1 on malformed packet or error,
+ *          0 if duplicate packet / already received,
+ *          1 if a new chunk was processed successfully.
+ *
+ * @details
+ * Expects packet[0] == MSG_DATA_PACKET, header fields are big-endian.
+ * Validates bounds to avoid writing beyond the allocated file buffer.
+ */
 static int process_data_packet(transfer_ctx_t *ctx, unsigned char *packet, int len) {
     if (len < 12) {
         return -1; // Too short
@@ -198,7 +267,7 @@ static int process_data_packet(transfer_ctx_t *ctx, unsigned char *packet, int l
     return 1; // Successfully processed new chunk
 }
 
-// Base protocol function to fetch a complete file
+
 char* llm_fetch_file(uint8_t file_id, int *size_out) {
     uint32_t file_size, total_chunks;
     unsigned char expected_hash[32];
@@ -370,7 +439,16 @@ char* fetch_tokenizer(int *size_out) {
     return llm_fetch_file(FILE_TOKENIZER, size_out);
 }
 
-// Test main function
+/**
+ * @brief Test harness main() that fetches weights and tokenizer via UDP.
+ * @param argc Argument count (unused).
+ * @param argv Argument vector (unused).
+ * @return Exits with code 0 on completion.
+ *
+ * @details
+ * Runs two consecutive transfers (weights and tokenizer), prints sizes and
+ * SHA-256 hex digests for manual verification, and frees returned buffers.
+ */
 int main(int argc, char *argv[]) {
     int weights_size, tokenizer_size;
     char *weights, *tokenizer;
