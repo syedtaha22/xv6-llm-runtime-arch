@@ -126,11 +126,11 @@ char* fetch_tokenizer(int *size_out);
  * - MAX_RECEIVE_SPINS / MAX_RETRY_ROUNDS: client-side retry/backoff parameters
  */
 #define SERVER_PORT 9999
-#define SERVER_IP ((10 << 24) | (0 << 16) | (2 << 8) | 2)  // 10.0.2.2
+#define SERVER_IP ((0 << 24) | (0 << 16) | (0 << 8) | 0) // 127.0.0.1
 #define CHUNK_SIZE 512
-#define MAX_RANGE 16
-#define MAX_RETRANS 32
-#define MAX_RECEIVE_SPINS 1000000
+#define MAX_RANGE 8
+#define MAX_RETRANS 16
+#define MAX_RECEIVE_SPINS 100000
 #define MAX_RETRY_ROUNDS 3
 
 /* ----------------------------------------------------------------------------

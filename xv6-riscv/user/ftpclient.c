@@ -18,7 +18,7 @@
  * the kernel UDP facilities.
  */
 
-#include "types.h"
+#include "kernel/types.h"
 #include "user.h"
 #include "ftpclient.h"
 #include "sha256.h"
@@ -105,7 +105,7 @@ static void get_missing_in_range(transfer_ctx_t *ctx, uint32_t start, uint32_t e
 
 int llm_meta_request(uint8_t file_id, uint32_t *file_size, uint32_t *total_chunks, unsigned char *file_hash) {
     // Bind to a random port
-    short port = 10000 + (getpid() % 1000); // Use PID to get somewhat unique port
+    uint16_t port = 10000 + (getpid() % 1000); // Use PID to get somewhat unique port
     if (bind(port) < 0) {
         printf( "Failed to bind to port %d\n", port);
         return -1;
@@ -121,17 +121,19 @@ int llm_meta_request(uint8_t file_id, uint32_t *file_size, uint32_t *total_chunk
     // Send request
     if (send(port, SERVER_IP, SERVER_PORT, (char*)req, 4) < 0) {
         printf( "Failed to send META_REQ\n");
+        unbind(port);
         return -1;
     }
     
     // Receive response
     unsigned char resp[48];
-    int src_ip;
-    short src_port;
+    uint32 src_ip;
+    uint16 src_port;
     int len = recv(port, &src_ip, &src_port, (char*)resp, sizeof(resp));
     
     if (len < 48 || resp[0] != MSG_META_RESP) {
         printf( "Invalid META_RESP: len=%d, type=%d\n", len, resp[0]);
+        unbind(port);
         return -1;
     }
     
@@ -144,12 +146,12 @@ int llm_meta_request(uint8_t file_id, uint32_t *file_size, uint32_t *total_chunk
     for (int i = 0; i < 32; i++) {
         file_hash[i] = resp[16 + i];
     }
-    
+    unbind(port);
     return 0;
 }
 
 int llm_data_range_request(uint8_t file_id, uint32_t start_idx, uint16_t count) {
-    short port = 10000 + (getpid() % 1000);
+    uint16_t port = 10000 + (getpid() % 1000);
     
     // Prepare DATA_RANGE_REQ message
     unsigned char req[12];
@@ -176,7 +178,7 @@ int llm_data_range_request(uint8_t file_id, uint32_t start_idx, uint16_t count) 
 
 
 int llm_retrans_request(uint8_t file_id, uint32_t *indices, uint16_t count) {
-    short port = 10000 + (getpid() % 1000);
+    uint16_t port = 10000 + (getpid() % 1000);
     
     // Prepare RETRANS_REQ message
     int msg_size = 4 + 4 * count;
@@ -272,7 +274,7 @@ char* llm_fetch_file(uint8_t file_id, int *size_out) {
     uint32_t file_size, total_chunks;
     unsigned char expected_hash[32];
     transfer_ctx_t ctx;
-    short client_port = 10000 + (getpid() % 1000);
+    uint16_t client_port = 10000 + (getpid() % 1000);
     
     printf( "Starting file transfer for file_id=%d\n", file_id);
     
@@ -340,8 +342,8 @@ char* llm_fetch_file(uint8_t file_id, int *size_out) {
             int spins;
             for (spins = 0; spins < MAX_RECEIVE_SPINS / 10; spins++) {
                 unsigned char buffer[12 + CHUNK_SIZE]; // Max DATA_PACKET size
-                int src_ip;
-                short src_port;
+                uint32 src_ip;
+                uint16 src_port;
                 
                 int len = recv(client_port, &src_ip, &src_port, (char*)buffer, sizeof(buffer));
                 if (len > 0) {
@@ -369,8 +371,8 @@ char* llm_fetch_file(uint8_t file_id, int *size_out) {
                     // Receive retransmitted packets
                     for (int spins = 0; spins < MAX_RECEIVE_SPINS / 10; spins++) {
                         unsigned char buffer[12 + CHUNK_SIZE];
-                        int src_ip;
-                        short src_port;
+                        uint32 src_ip;
+                        uint16 src_port;
                         
                         int len = recv(client_port, &src_ip, &src_port, (char*)buffer, sizeof(buffer));
                         if (len > 0) {
