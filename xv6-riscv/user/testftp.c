@@ -30,57 +30,74 @@
 int main(int argc, char *argv[]) {
     int weights_size, tokenizer_size;
     char *weights, *tokenizer;
+    char buf[128];
     
-    printf( "Starting LLM file transfer test...\n");
-    
-    // Fetch model weights
+    /* set a global tag for testutil output */
+    set_tag("LLMFTP");
+
+    info(0, "Starting LLM file transfer test...");
+
+    /* Fetch model weights */
     weights = fetch_model_weights(&weights_size);
     if (weights) {
-        printf( "Successfully fetched weights: %d bytes\n", weights_size);
-        
-        // Verify the hash again for good measure
+        sprintf(buf, "Successfully fetched weights: %d bytes", weights_size);
+        pass(1, buf);
+
+        /* Verify the hash again for good measure */
         unsigned char hash[32];
         SHA256_CTX ctx;
+        int i;
+        char hex[65];
+
         sha256_init(&ctx);
         sha256_update(&ctx, (unsigned char*)weights, weights_size);
         sha256_final(&ctx, hash);
-        
-        printf( "Final SHA-256: ");
-        for (int i = 0; i < 32; i++) {
-            printf( "%02x", hash[i] & 0xFF);
+
+        /* build hex string */
+        for (i = 0; i < 32; i++) {
+            sprintf(hex + i*2, "%02x", hash[i] & 0xFF);
         }
-        printf( "\n");
-        
+        hex[64] = '\0';
+
+        sprintf(buf, "Final SHA-256: %s", hex);
+        info(2, buf);
+
         free(weights);
     } else {
-        printf( "Failed to fetch weights\n");
+        failnoex(1, "Failed to fetch weights");
     }
-    
-    printf( "---\n");
-    
-    // Fetch tokenizer
+
+    info(0, "---");
+
+    /* Fetch tokenizer */
     tokenizer = fetch_tokenizer(&tokenizer_size);
     if (tokenizer) {
-        printf( "Successfully fetched tokenizer: %d bytes\n", tokenizer_size);
-        
-        // Verify the hash again for good measure
-        unsigned char hash[32];
-        SHA256_CTX ctx;
-        sha256_init(&ctx);
-        sha256_update(&ctx, (unsigned char*)tokenizer, tokenizer_size);
-        sha256_final(&ctx, hash);
-        
-        printf( "Final SHA-256: ");
-        for (int i = 0; i < 32; i++) {
-            printf( "%02x", hash[i] & 0xFF);
+        sprintf(buf, "Successfully fetched tokenizer: %d bytes", tokenizer_size);
+        pass(1, buf);
+
+        /* Verify the hash again for good measure */
+        unsigned char hash2[32];
+        SHA256_CTX ctx2;
+        int i2;
+        char hex2[65];
+
+        sha256_init(&ctx2);
+        sha256_update(&ctx2, (unsigned char*)tokenizer, tokenizer_size);
+        sha256_final(&ctx2, hash2);
+
+        for (i2 = 0; i2 < 32; i2++) {
+            sprintf(hex2 + i2*2, "%02x", hash2[i2] & 0xFF);
         }
-        printf( "\n");
-        
+        hex2[64] = '\0';
+
+        sprintf(buf, "Final SHA-256: %s", hex2);
+        info(2, buf);
+
         free(tokenizer);
     } else {
-        printf( "Failed to fetch tokenizer\n");
+        failnoex(1, "Failed to fetch tokenizer");
     }
-    
-    printf( "LLM file transfer test completed\n");
+
+    pass(0, "LLM file transfer test completed");
     exit(0);
 }
