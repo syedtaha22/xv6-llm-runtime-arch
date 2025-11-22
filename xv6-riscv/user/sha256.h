@@ -25,4 +25,8 @@ void sha256_update(SHA256_CTX *ctx, const BYTE data[], size_t len);
 void sha256_final(SHA256_CTX *ctx, BYTE hash[]);
 void sha256_transform(SHA256_CTX *ctx, const BYTE data[]);
 
+// Utility functions for hash display and conversion
+void sha256_to_hex(const BYTE hash[32], char hex[65]);
+void sha256_print(const BYTE hash[32]);
+
 #endif

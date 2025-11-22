@@ -18,6 +18,7 @@ import socket
 import struct
 import hashlib
 import sys
+import os
 
 from custom_logger import LoggerSetup
 
@@ -31,8 +32,10 @@ MSG_ERROR = 0x06
 FILE_WEIGHTS = 0x01
 FILE_TOKENIZER = 0x02
 
-# Setup custom logger
-logger_setup = LoggerSetup('LLM-RFTP-Client', log_level='INFO', filename='client.log')
+# Setup custom logger with script-relative log directory
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+LOG_DIR = os.path.join(SCRIPT_DIR, 'logs')
+logger_setup = LoggerSetup('LLM-RFTP-Client', log_level='INFO', filename='client.log', log_dir=LOG_DIR)
 logger = logger_setup.get_logger()
 
 

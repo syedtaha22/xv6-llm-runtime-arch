@@ -164,3 +164,37 @@ void sha256_final(SHA256_CTX *ctx, BYTE hash[]) {
   }
 }
 
+/**
+ * @brief Convert a 32-byte SHA-256 hash to a 64-character hex string.
+ * @param hash Input hash (32 bytes).
+ * @param hex Output buffer (must be at least 65 bytes for null terminator).
+ * 
+ * @details
+ * Converts each byte to two hexadecimal characters (lowercase).
+ * The output string is null-terminated.
+ */
+void sha256_to_hex(const BYTE hash[32], char hex[65]) {
+  const char hex_chars[] = "0123456789abcdef";
+  for (int i = 0; i < 32; i++) {
+    hex[i*2] = hex_chars[(hash[i] >> 4) & 0x0F];
+    hex[i*2 + 1] = hex_chars[hash[i] & 0x0F];
+  }
+  hex[64] = '\0';
+}
+
+/**
+ * @brief Print a 32-byte SHA-256 hash in hexadecimal format.
+ * @param hash The hash to print (32 bytes).
+ * 
+ * @details
+ * Prints the hash as a continuous 64-character hex string with no newline.
+ * Uses printf to output directly to console.
+ */
+void sha256_print(const BYTE hash[32]) {
+  for (int i = 0; i < 32; i++) {
+    if (hash[i] < 16) printf("0");
+    printf("%x", hash[i]);
+  }
+}
+
+

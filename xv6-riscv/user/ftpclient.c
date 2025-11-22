@@ -76,9 +76,9 @@ static int all_chunks_received(transfer_ctx_t *ctx) {
 static int count_missing_in_range(transfer_ctx_t *ctx, uint32_t start, uint32_t end) {
     int count = 0;
     for (uint32_t i = start; i < end && i < ctx->total_chunks; i++) {
-        if (!ctx->received[i]) {
-            count++;
-        }
+      if (!ctx->received[i]) {
+        count++;
+      }
     }
     return count;
 }
@@ -403,6 +403,7 @@ char* llm_fetch_file(uint8_t file_id, int *size_out) {
         }
         printf( "Failed to receive all chunks after %d rounds (%d missing)\n", 
                MAX_RETRY_ROUNDS, missing);
+        unbind(client_port);
         free(ctx.file_buf);
         free(ctx.received);
         return 0;
@@ -419,12 +420,14 @@ char* llm_fetch_file(uint8_t file_id, int *size_out) {
     
     if (memcmp(computed_hash, expected_hash, 32) != 0) {
         printf( "SHA-256 verification failed!\n");
+        unbind(client_port);
         free(ctx.file_buf);
         free(ctx.received);
         return 0;
     }
     
     printf( "File transfer completed successfully\n");
+    unbind(client_port);
     free(ctx.received);
     *size_out = file_size;
     return ctx.file_buf;

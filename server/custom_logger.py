@@ -7,7 +7,7 @@ class LoggerSetup:
     A class to set up a logger with console (colored) and file logging.
     Logs are appended to a specified file within a 'logs/' directory.
     """
-    def __init__(self, log_name: str, log_level: str = 'INFO', filename: str = 'app.log'):
+    def __init__(self, log_name: str, log_level: str = 'INFO', filename: str = 'app.log', log_dir: str = None):
         """
         Initializes the logger.
 
@@ -20,8 +20,12 @@ class LoggerSetup:
             Defaults to 'INFO'.
         filename : str, optional
             The base name of the log file (e.g., 'app.log').
-            The file will be saved in a 'logs/' directory: 'logs/app.log'.
+            The file will be saved in the log_dir directory.
             Logs will be appended to this file across runs.
+        log_dir : str, optional
+            The directory where log files should be stored.
+            If None, defaults to 'logs/' relative to current working directory.
+            If provided, should be an absolute path.
         """
         self.log = logging.getLogger(log_name)
         numeric_level = getattr(logging, log_level.upper(), None)
@@ -33,7 +37,9 @@ class LoggerSetup:
         if not self.log.handlers:
             coloredlogs.install(level=numeric_level, logger=self.log)
 
-            log_dir = 'logs'
+            if log_dir is None:
+                log_dir = 'logs'
+            
             if not os.path.exists(log_dir):
                 os.makedirs(log_dir)
 

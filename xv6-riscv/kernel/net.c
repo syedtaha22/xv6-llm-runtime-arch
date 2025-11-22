@@ -747,8 +747,12 @@ ip_rx(char *buf, int len)
   pkt->next = 0;                          // Initialize as last element in queue
   pkt->src_ip = ntohl(ip->ip_src);        // Convert source IP to host byte order
   pkt->src_port = ntohs(udp->sport);      // Convert source port to host byte order
-  pkt->len = udp_len;                     // Store payload length for bounds checking
-  memmove(pkt->data, (char *)(udp + 1), udp_len);  // Copy payload to persistent buffer
+  
+  // BOUNDS CHECK: Ensure UDP payload doesn't exceed allocated page size
+  // kalloc() returns a 4096-byte page, so limit copy to prevent buffer overflow
+  uint copy_len = udp_len > PGSIZE ? PGSIZE : udp_len;
+  pkt->len = copy_len;                    // Store actual copied length for bounds checking
+  memmove(pkt->data, (char *)(udp + 1), copy_len);  // Copy payload to persistent buffer
 
   // QUEUE OPERATION: Enqueue packet for application consumption
   // Add to tail of linked list for FIFO delivery semantics

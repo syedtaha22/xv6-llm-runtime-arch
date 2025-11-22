@@ -41,8 +41,10 @@ CHUNK_SIZE = 512
 MAX_RANGE = 16
 MAX_RETRANS = 32
 
-# Setup custom logger
-logger_setup = LoggerSetup('LLM-RFTP-Server', log_level='INFO', filename='server.log')
+# Setup custom logger with script-relative log directory
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+LOG_DIR = os.path.join(SCRIPT_DIR, 'logs')
+logger_setup = LoggerSetup('LLM-RFTP-Server', log_level='INFO', filename='server.log', log_dir=LOG_DIR)
 logger = logger_setup.get_logger()
 
 
@@ -195,7 +197,7 @@ class LLMRFTPServer:
             UDP port to listen on (default: DEFAULT_PORT).
         file_paths : dict, optional
             Dictionary mapping file_id to file paths. If None, uses default
-            paths: {0x01: 'stories15M.bin', 0x02: 'tokenizer.bin'}.
+            paths in models/ directory.
 
         Raises
         ------
@@ -217,9 +219,10 @@ class LLMRFTPServer:
         # Default file paths
         if file_paths is None:
             base_path = os.path.dirname(os.path.abspath(__file__))
+            model_dir = os.path.join(base_path, 'models')
             file_paths = {
-                FILE_WEIGHTS: os.path.join(base_path, 'stories15M.bin'),
-                FILE_TOKENIZER: os.path.join(base_path, 'tokenizer.bin'),
+                FILE_WEIGHTS: os.path.join(model_dir, 'stories15M.bin'),
+                FILE_TOKENIZER: os.path.join(model_dir, 'tokenizer.bin'),
             }
 
         # Load files
@@ -298,8 +301,8 @@ class LLMRFTPServer:
             f.size, CHUNK_SIZE, f.total_chunks
         ) + f.sha256
 
-        logger.debug(f"META_RESP to {client_addr}: file={file_id}, "
-                    f"size={f.size}, chunks={f.total_chunks}")
+        logger.info(f"→ Sending META_RESP to {client_addr}: file={file_id}, "
+                    f"size={f.size}, chunks={f.total_chunks}, sha256={f.sha256.hex()[:16]}...")
         return response
 
     def handle_data_range_req(self, data, client_addr):
@@ -352,19 +355,21 @@ class LLMRFTPServer:
             logger.warning(f"DATA_RANGE_REQ start_idx {start_idx} >= {f.total_chunks}")
             return self.error_response(file_id, 2)
 
-        # Build response: send all requested chunks
-        responses = []
+        # Build response: send each chunk as a separate UDP packet
+        packets_sent = 0
         for i in range(start_idx, min(start_idx + count, f.total_chunks)):
             chunk_data = f.get_chunk(i)
             if chunk_data is not None:
                 pkt = self.data_packet(file_id, i, chunk_data)
-                responses.append(pkt)
+                self.socket.sendto(pkt, client_addr)
+                packets_sent += 1
                 self.stats['packets_sent'] += 1
 
-        logger.debug(f"DATA_RANGE_REQ from {client_addr}: file={file_id}, "
-                    f"range=[{start_idx}, {start_idx + count}), sent {len(responses)} packets")
+        logger.info(f"→ Sent DATA_RANGE_REQ response to {client_addr}: file={file_id}, "
+                    f"range=[{start_idx}, {min(start_idx + count, f.total_chunks)}), "
+                    f"sent {packets_sent} packets")
 
-        return b''.join(responses) if responses else b''
+        return None  # Already sent, no response to return
 
     def handle_retrans_req(self, data, client_addr):
         """
@@ -413,11 +418,9 @@ class LLMRFTPServer:
 
         f = self.files[file_id]
 
-        # Parse chunk indices
-        responses = []
-        offset = 4
-
-        for _ in range(count):
+        # Parse chunk indices and send each as a separate UDP packet
+        packets_sent = 0
+        for idx in range(count):
             if offset + 4 > len(data):
                 break
 
@@ -428,13 +431,14 @@ class LLMRFTPServer:
                 chunk_data = f.get_chunk(chunk_idx)
                 if chunk_data is not None:
                     pkt = self.data_packet(file_id, chunk_idx, chunk_data)
-                    responses.append(pkt)
+                    self.socket.sendto(pkt, client_addr)
+                    packets_sent += 1
                     self.stats['packets_sent'] += 1
 
-        logger.debug(f"RETRANS_REQ from {client_addr}: file={file_id}, "
-                    f"indices={count}, sent {len(responses)} packets")
+        logger.info(f"→ Sent RETRANS_REQ response to {client_addr}: file={file_id}, "
+                    f"requested_indices={count}, sent {packets_sent} packets")
 
-        return b''.join(responses) if responses else b''
+        return None  # Already sent, no response to return
 
     def data_packet(self, file_id, chunk_idx, chunk_data):
         """
@@ -461,7 +465,7 @@ class LLMRFTPServer:
                                            [reserved:2][data:N]
         """
         payload_len = len(chunk_data)
-        header = struct.pack('>BBHHII',
+        header = struct.pack('>BBHIHH',
             MSG_DATA_PACKET, file_id, 0,     # msg_type, file_id, flags
             chunk_idx, payload_len, 0        # chunk_idx, payload_len, reserved
         )
@@ -557,12 +561,14 @@ class LLMRFTPServer:
             while True:
                 try:
                     data, client_addr = self.socket.recvfrom(65536)
+                    logger.info(f"← Received packet from {client_addr}: {len(data)} bytes, msg_type=0x{data[0]:02x}")
 
                     response = self.handle_message(data, client_addr)
 
-                    # Send response (can be multiple packets)
+                    # Send response if handler didn't send it already
                     if response:
                         self.socket.sendto(response, client_addr)
+                        logger.info(f"→ Sent response to {client_addr}: {len(response)} bytes")
 
                 except KeyboardInterrupt:
                     logger.info("Server shutdown requested")
@@ -612,23 +618,27 @@ def main():
     )
     parser.add_argument(
         '--weights', type=str,
-        help='Path to stories15M.bin (default: current directory)'
+        help='Path to weights file (default: models/stories15M.bin)'
     )
     parser.add_argument(
         '--tokenizer', type=str,
-        help='Path to tokenizer.bin (default: current directory)'
+        help='Path to tokenizer file (default: models/tokenizer.bin)'
     )
 
     args = parser.parse_args()
 
-    # Build file paths
-    base_path = os.path.dirname(os.path.abspath(__file__))
-    file_paths = {
-        FILE_WEIGHTS: args.weights or os.path.join(base_path, 'stories15M.bin'),
-        FILE_TOKENIZER: args.tokenizer or os.path.join(base_path, 'tokenizer.bin'),
-    }
+    # Build file paths - only if command-line args are provided
+    file_paths = None
+    if args.weights or args.tokenizer:
+        # If only one arg provided, still need to build full dict with defaults
+        base_path = os.path.dirname(os.path.abspath(__file__))
+        model_dir = os.path.join(base_path, 'models')
+        file_paths = {
+            FILE_WEIGHTS: args.weights or os.path.join(model_dir, 'stories15M.bin'),
+            FILE_TOKENIZER: args.tokenizer or os.path.join(model_dir, 'tokenizer.bin'),
+        }
 
-    # Create and run server
+    # Create and run server (file_paths=None uses __init__ defaults)
     server = LLMRFTPServer(port=args.port, file_paths=file_paths)
     server.run()
 

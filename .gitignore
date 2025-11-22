@@ -18,7 +18,6 @@ test_*
 #  LLaMA2C Project-Specific
 # ===========================================
 # Model binaries and checkpoints — heavy, not for git
-models/
 llama2c/models/
 
 # Raw perf data (binary profiling traces)
@@ -40,6 +39,11 @@ __pycache__/
 *.pyc
 .venv/
 venv/
+
+# ===========================================
+#  Other script files
+# ===========================================
+*.sh
 
 # ===========================================
 #  Temporary and Log Files
