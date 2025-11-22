@@ -30,6 +30,7 @@ char *tests[] = {
   "testxstdlib",
   "testxmath",
   "testxstrlib",
+  "testftp",
   0   // null-terminated
 };
 

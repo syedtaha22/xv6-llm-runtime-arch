@@ -1,5 +1,5 @@
 /**
- * @file udp_client.h
+ * @file ftpclient.h
  * @author Hamna Sajid
  * @date 22nd November 2025
  * 
@@ -7,7 +7,7 @@
  *
  * @details
  * This header exposes the simple application-level protocol used by the UDP
- * client (udp_client.c). It provides:
+ * client (ftpclient.c). It provides:
  *  - high-level functions to fetch files from the server (llm_fetch_file and wrappers)
  *  - low-level protocol operations (META/DATA/RETRANS requests)
  *  - protocol message type and size constants
@@ -16,8 +16,8 @@
  * All multi-byte fields in wire messages are encoded in big-endian (network) order.
  */
 
-#ifndef UDP_CLIENT_H
-#define UDP_CLIENT_H
+#ifndef FTPCLIENT_H
+#define FTPCLIENT_H
 
 #include "kernel/types.h"
 #include <stdint.h>
@@ -139,4 +139,4 @@ char* fetch_tokenizer(int *size_out);
 #define FILE_WEIGHTS 0x01
 #define FILE_TOKENIZER 0x02
 
-#endif
+#endif // FTPCLIENT_H
