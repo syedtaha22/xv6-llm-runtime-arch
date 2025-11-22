@@ -137,17 +137,17 @@ class FTPTestClient:
 
         if not response:
             logger.error(f"META_REQ: No response from server")
-            print("  ✗ No response")
+            print(" No response")
             return False
 
         if len(response) < 48:
             logger.error(f"META_REQ: Response too short: {len(response)} bytes")
-            print(f"  ✗ Response too short: {len(response)} bytes")
+            print(f"    Response too short: {len(response)} bytes")
             return False
 
         if response[0] != MSG_META_RESP:
             logger.error(f"META_REQ: Wrong message type: {response[0]}")
-            print(f"  ✗ Wrong message type: {response[0]}")
+            print(f"    Wrong message type: {response[0]}")
             return False
 
         file_id_resp = response[1]
@@ -157,9 +157,9 @@ class FTPTestClient:
         total_chunks = struct.unpack('>I', response[12:16])[0]
         file_sha256 = response[16:48]
 
-        logger.info(f"  ✓ File: {file_id_resp}, Size: {file_size} bytes, Chunks: {total_chunks}")
+        logger.info(f"  File: {file_id_resp}, Size: {file_size} bytes, Chunks: {total_chunks}")
         logger.info(f"    SHA-256: {file_sha256.hex()[:32]}...")
-        print(f"  ✓ File: {file_id_resp}, Size: {file_size} bytes, Chunks: {total_chunks}")
+        print(f"    File: {file_id_resp}, Size: {file_size} bytes, Chunks: {total_chunks}")
         print(f"    SHA-256: {file_sha256.hex()[:32]}...")
         print(f"    Chunk size: {chunk_size}, Version: {version}")
 
@@ -207,7 +207,7 @@ class FTPTestClient:
 
         if not response:
             logger.error(f"DATA_RANGE_REQ: No response from server")
-            print("  ✗ No response")
+            print(" No response")
             return False
 
         # Parse multiple DATA_PACKET responses
@@ -221,7 +221,7 @@ class FTPTestClient:
             msg_type = response[offset]
             if msg_type != MSG_DATA_PACKET:
                 logger.warning(f"DATA_RANGE_REQ: Unexpected message type: {msg_type}")
-                print(f"  ✗ Unexpected message type: {msg_type}")
+                print(f"    Unexpected message type: {msg_type}")
                 break
 
             chunk_idx = struct.unpack('>I', response[offset+4:offset+8])[0]
@@ -234,8 +234,8 @@ class FTPTestClient:
 
             offset += 12 + payload_len
 
-        logger.info(f"  ✓ Received {len(packets)} packets")
-        print(f"  ✓ Received {len(packets)} packets")
+        logger.info(f"  Received {len(packets)} packets")
+        print(f"    Received {len(packets)} packets")
         for p in packets[:3]:  # Show first 3
             logger.debug(f"    - Chunk {p['chunk_idx']}: {p['payload_len']} bytes")
             print(f"    - Chunk {p['chunk_idx']}: {p['payload_len']} bytes")
@@ -277,7 +277,7 @@ class FTPTestClient:
         result = self.test_meta_req(file_id)
         if not result:
             logger.error(f"Full transfer: Failed to get metadata for file {file_id}")
-            print("  ✗ Failed to get metadata")
+            print(" Failed to get metadata")
             return False
 
         _, file_size, chunk_size, total_chunks, expected_sha256 = result
@@ -297,7 +297,7 @@ class FTPTestClient:
 
             if not response:
                 logger.warning(f"Full transfer: No response for batch [{start_idx}, {start_idx+count})")
-                print(f"  ✗ No response for batch [{start_idx}, {start_idx+count})")
+                print(f"    No response for batch [{start_idx}, {start_idx+count})")
                 continue
 
             # Parse packets
@@ -334,23 +334,23 @@ class FTPTestClient:
         if all(received):
             computed_sha256 = hashlib.sha256(bytes(file_buf)).digest()
             if computed_sha256 == expected_sha256:
-                logger.info(f"  ✓ SUCCESS: File verified! SHA-256 matches")
+                logger.info(f"  SUCCESS: File verified! SHA-256 matches")
                 logger.info(f"    Transferred {file_size} bytes in {total_chunks} chunks")
-                print(f"  ✓ SUCCESS: File verified! SHA-256 matches")
+                print(f"    SUCCESS: File verified! SHA-256 matches")
                 print(f"    Transferred {file_size} bytes in {total_chunks} chunks")
                 return True
             else:
                 logger.error(f"Full transfer: SHA-256 mismatch!")
                 logger.error(f"    Expected: {expected_sha256.hex()[:32]}...")
                 logger.error(f"    Got:      {computed_sha256.hex()[:32]}...")
-                print(f"  ✗ SHA-256 mismatch!")
+                print(f"    SHA-256 mismatch!")
                 print(f"    Expected: {expected_sha256.hex()[:32]}...")
                 print(f"    Got:      {computed_sha256.hex()[:32]}...")
                 return False
         else:
             missing = sum(1 for r in received if not r)
             logger.error(f"Full transfer: {missing} chunks missing")
-            print(f"  ✗ Transfer incomplete: {missing} chunks missing")
+            print(f"    Transfer incomplete: {missing} chunks missing")
             return False
 
     def close(self):
@@ -439,8 +439,8 @@ def main():
                             payload_len = struct.unpack('>H', response[offset+8:offset+10])[0]
                             offset += 12 + payload_len
                             count += 1
-                        logger.info(f"  ✓ Received {count} packets")
-                        print(f"  ✓ Received {count} packets")
+                        logger.info(f"  Received {count} packets")
+                        print(f"    Received {count} packets")
 
         client.close()
         print("\n" + "="*70)

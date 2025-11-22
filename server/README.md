@@ -198,7 +198,7 @@ Each request is independent and fully specified:
 
 ## Testing
 
-- **`test_client.py`**: Created for testing
+- **`client.py`**: Created for testing
   - Tests individual message types
   - Performs partial file transfers (first 100 chunks)
   - Validates SHA-256 checksums
@@ -210,7 +210,7 @@ Each request is independent and fully specified:
 python3 server.py
 
 # Terminal 2: Run test
-python3 test_client.py --host localhost --port 9999 --quick
+python3 client.py --host localhost --port 9999 --quick
 ```
 
 ### Manual Testing with netcat
