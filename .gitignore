@@ -49,6 +49,7 @@ venv/
 #  Temporary and Log Files
 # ===========================================
 *.tmp
+logs/
 
 # ===========================================
 #  Keep Useful Data / Reports

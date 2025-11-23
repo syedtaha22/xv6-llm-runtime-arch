@@ -2,9 +2,9 @@
  * @file testftp.c
  * @author Hamna Sajid
  * @date 22nd November 2025
- * 
+ *
  * @brief Test harness for the UDP-based LLM file transfer client.
- * 
+ *
  * @details
  * This program tests the functionality of the UDP client by fetching
  * model weights and tokenizer files from a server, printing their sizes
@@ -18,86 +18,65 @@
 #include "sha256.h"
 #include "xstrlib.h"
 
-/* Minimal hex helper that uses xsprintf */
-static void bytes_to_hex(const unsigned char *in, int len, char *out) {
-    for (int i = 0; i < len; i++) {
-        xsprintf(out + i*2, "%02x", in[i] & 0xFF);
-    }
-    out[len*2] = '\0';
+ /**
+  * @brief Test fetching a file and verifying its hash.
+  * @param file_id File identifier (FILE_WEIGHTS or FILE_TOKENIZER).
+  * @param file_name Name of the file for logging.
+  * @return 0 on success, -1 on failure.
+  */
+static int test_fetch_file(uint8_t file_id, const char* file_name) {
+  int file_size;
+  char* file_data;
+  char buf[256];
+  char hex[65];
+
+  file_data = llm_fetch_file(file_id, &file_size);
+  if (!file_data) {
+    xsprintf(buf, "Failed to fetch %s", file_name);
+    failnoex(1, buf);
+    return -1;
+  }
+
+  xsprintf(buf, "Successfully fetched %s: %d bytes", file_name, file_size);
+  pass(1, buf);
+
+  /* Verify the hash */
+  unsigned char hash[32];
+  SHA256_CTX ctx;
+
+  sha256_init(&ctx);
+  sha256_update(&ctx, (unsigned char*)file_data, file_size);
+  sha256_final(&ctx, hash);
+
+  sha256_to_hex(hash, hex);
+
+  xsprintf(buf, "Final SHA-256: %s", hex);
+  info(2, buf);
+
+  free(file_data);
+  return 0;
 }
 
 /**
  * @brief Test harness main() that fetches weights and tokenizer via UDP.
  * @param argc Argument count (unused).
  * @param argv Argument vector (unused).
- * @return Exits with code 0 on completion.
- *
- * @details
- * Runs two consecutive transfers (weights and tokenizer), prints sizes and
- * SHA-256 hex digests for manual verification, and frees returned buffers.
+ * @return Exits with code 0 on success, 1 if any test failed.
  */
-int main(int argc, char *argv[]) {
-    int weights_size, tokenizer_size;
-    char *weights, *tokenizer;
-    char buf[256];
-    char hex[65];
-    
-    /* set a global tag for testutil output */
-    set_tag("LLMFTP");
+int main(int argc, char* argv[]) {
+  int failed = 0;
 
-    info(0, "Starting LLM file transfer test...");
+  set_tag("LLMFTP");
 
-    /* Fetch model weights */
-    weights = fetch_model_weights(&weights_size);
-    if (weights) {
-        xsprintf(buf, "Successfully fetched weights: %d bytes", weights_size);
-        pass(1, buf);
+  info(0, "Starting LLM file transfer test...");
 
-        /* Verify the hash again for good measure */
-        unsigned char hash[32];
-        SHA256_CTX ctx;
+  if (test_fetch_file(FILE_WEIGHTS, "weights") < 0) failed = 1;
 
-        sha256_init(&ctx);
-        sha256_update(&ctx, (unsigned char*)weights, weights_size);
-        sha256_final(&ctx, hash);
+  info(0, "---");
 
-        /* build hex string */
-        bytes_to_hex(hash, 32, hex);
+  if (test_fetch_file(FILE_TOKENIZER, "tokenizer") < 0) failed = 1;
+  if (failed) fail(0, "LLM file transfer test failed");
 
-        xsprintf(buf, "Final SHA-256: %s", hex);
-        info(2, buf);;
-
-        free(weights);
-    } else {
-        failnoex(1, "Failed to fetch weights");
-    }
-
-    info(0, "---");
-
-    /* Fetch tokenizer */
-    tokenizer = fetch_tokenizer(&tokenizer_size);
-    if (tokenizer) {
-        xsprintf(buf, "Successfully fetched tokenizer: %d bytes", tokenizer_size);
-        pass(1, buf);
-
-        /* Verify the hash again for good measure */
-        unsigned char hash2[32];
-        SHA256_CTX ctx2;
-
-        sha256_init(&ctx2);
-        sha256_update(&ctx2, (unsigned char*)tokenizer, tokenizer_size);
-        sha256_final(&ctx2, hash2);
-
-        bytes_to_hex(hash2, 32, hex);
-
-        xsprintf(buf, "Final SHA-256: %s", hex);
-        info(2, buf);
-
-        free(tokenizer);
-    } else {
-        failnoex(1, "Failed to fetch tokenizer");
-    }
-
-    pass(0, "LLM file transfer test completed");
-    exit(0);
+  pass(0, "LLM file transfer test completed");
+  exit(0);
 }
