@@ -249,10 +249,7 @@ static int process_data_packet(transfer_ctx_t* ctx, unsigned char* packet, int l
     uint16_t payload_len = (packet[8] << 8) | packet[9];
 
     if (chunk_idx >= ctx->total_chunks) return -1; // Invalid chunk index
-
     if (len < 12 + payload_len) return -1; // Packet too short for claimed payload
-
-    // Check if we already have this chunk
     if (ctx->received[chunk_idx]) return 0; // Duplicate, but not an error
 
     // Calculate destination offset
@@ -299,15 +296,7 @@ static int request_chunk_range(transfer_ctx_t* ctx, uint8_t file_id, uint32_t st
         uint16 src_port;
 
         int len = recv(client_port, &src_ip, &src_port, (char*)buffer, sizeof(buffer));
-        if (len > 0) {
-            int result = process_data_packet(ctx, buffer, len);
-            if (result == 1) {
-                new_chunks++;
-                // Update progress display
-                printf("\r[Attempt %d] Received: %d/%d chunks",
-                    attempt, count_received_chunks(ctx), ctx->total_chunks);
-            }
-        }
+        if (len > 0) process_data_packet(ctx, buffer, len);
 
         // Early exit if we've received all chunks in this range
         if (count_missing_in_range(ctx, start_idx, start_idx + count) == 0) {
@@ -381,7 +370,17 @@ static int verify_file_integrity(char* file_buf, int file_size, unsigned char* e
     sha256_update(&sha_ctx, (unsigned char*)file_buf, file_size);
     sha256_final(&sha_ctx, computed_hash);
 
-    return memcmp(computed_hash, expected_hash, 32) == 0;
+    if (memcmp(computed_hash, expected_hash, 32) != 0) {
+        // print the hash
+        char hex[65];
+        sha256_to_hex(computed_hash, hex);
+        printf("Computed SHA-256: %s\n", hex);
+        sha256_to_hex(expected_hash, hex);
+        printf("Expected SHA-256: %s\n", hex);
+        return 0; // Hash mismatch
+    }
+
+    return 1; // Hash matches
 }
 
 /**
@@ -441,7 +440,7 @@ char* llm_fetch_file(uint8_t file_id, int* size_out) {
     }
 
     // Step 2: Request all chunks in batches
-    printf("[Attempt 1] Received: 0/%d chunks", total_chunks);
+    printf("[Attempt 1] Requesting %d chunks...\n", total_chunks);
     for (uint32_t start_idx = 0; start_idx < total_chunks; start_idx += MAX_RANGE) {
         uint16_t count = (start_idx + MAX_RANGE > total_chunks) ?
             (total_chunks - start_idx) : MAX_RANGE;
@@ -456,8 +455,6 @@ char* llm_fetch_file(uint8_t file_id, int* size_out) {
         handle_missing_chunks(&ctx, file_id, client_port);
         attempt++;
     }
-
-    printf("\n");
 
     if (!all_chunks_received(&ctx)) {
         int missing = count_received_chunks(&ctx);

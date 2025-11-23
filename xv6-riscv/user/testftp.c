@@ -70,11 +70,12 @@ int main(int argc, char* argv[]) {
 
   info(0, "Starting LLM file transfer test...");
 
-  if (test_fetch_file(FILE_WEIGHTS, "weights") < 0) failed = 1;
-
-  info(0, "---");
 
   if (test_fetch_file(FILE_TOKENIZER, "tokenizer") < 0) failed = 1;
+  
+  info(0, "---");
+
+  if (test_fetch_file(FILE_WEIGHTS, "weights") < 0) failed = 1;
   if (failed) fail(0, "LLM file transfer test failed");
 
   pass(0, "LLM file transfer test completed");

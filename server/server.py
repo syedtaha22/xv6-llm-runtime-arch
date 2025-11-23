@@ -365,9 +365,9 @@ class LLMRFTPServer:
                 packets_sent += 1
                 self.stats['packets_sent'] += 1
 
-        logger.info(f"→ Sent DATA_RANGE_REQ response to {client_addr}: file={file_id}, "
-                    f"range=[{start_idx}, {min(start_idx + count, f.total_chunks)}), "
-                    f"sent {packets_sent} packets")
+        # logger.info(f"→ Sent DATA_RANGE_REQ response to {client_addr}: file={file_id}, " 
+        #             f"range=[{start_idx}, {min(start_idx + count, f.total_chunks)}), "
+        #             f"sent {packets_sent} packets")
 
         return None  # Already sent, no response to return
 
@@ -561,7 +561,7 @@ class LLMRFTPServer:
             while True:
                 try:
                     data, client_addr = self.socket.recvfrom(65536)
-                    logger.info(f"← Received packet from {client_addr}: {len(data)} bytes, msg_type=0x{data[0]:02x}")
+                    # logger.info(f"← Received packet from {client_addr}: {len(data)} bytes, msg_type=0x{data[0]:02x}")
 
                     response = self.handle_message(data, client_addr)
 
