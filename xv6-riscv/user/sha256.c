@@ -1,23 +1,75 @@
+/**
+ * @file sha256.c
+ * @brief Minimal SHA-256 implementation for xv6 user space
+ *
+ * This file implements the SHA-256 hashing algorithm following the FIPS-180-4
+ * specification. It contains the three main API functions exposed in
+ * sha256.h:
+ *
+ *   - sha256_init()   — Initialize the hashing context
+ *   - sha256_update() — Feed data to the hash function
+ *   - sha256_final()  — Finalize the digest
+ *
+ * The implementation is written to be fully portable inside xv6:
+ * no stdlib, no big-endian helpers, no dynamic memory
+ */
+
 #include "sha256.h"
 
-// bit rotations macros
+/**
+ * @def ROTLEFT(a,b)
+ * @brief Rotate a 32-bit integer left by b bits
+ */
 #define ROTLEFT(a,b)  (((a) << (b)) | ((a) >> (32 - (b))))
+
+/**
+ * @def ROTRIGHT(a,b)
+ * @brief Rotate a 32-bit integer right by b bits
+ */
 #define ROTRIGHT(a,b) (((a) >> (b)) | ((a) << (32 - (b))))
 
-
-// MAJ / CH — SHA-256 boolean functions
+/**
+ * @def CH(x,y,z)
+ * @brief SHA-256 "choose" function. Selects bits from y or z based on x
+ */
 #define CH(x,y,z)  (((x) & (y)) ^ (~(x) & (z)))
+
+/**
+ * @def MAJ(x,y,z)
+ * @brief SHA-256 "majority" function. Bitwise majority among x,y,z
+ */
 #define MAJ(x,y,z) (((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)))
 
-
-// Σ-functions — mixes bits by rotating and shifting
+/**
+ * @def EP0(x)
+ * @brief High-level mixing function Σ0 used in each compression round
+ */
 #define EP0(x) (ROTRIGHT(x,2)  ^ ROTRIGHT(x,13) ^ ROTRIGHT(x,22))
+
+/**
+ * @def EP1(x)
+ * @brief High-level mixing function Σ1 used in each compression round
+ */
 #define EP1(x) (ROTRIGHT(x,6)  ^ ROTRIGHT(x,11) ^ ROTRIGHT(x,25))
+
+/**
+ * @def SIG0(x)
+ * @brief σ0 message schedule function (rotations + shifts)
+ */
 #define SIG0(x)(ROTRIGHT(x,7)  ^ ROTRIGHT(x,18) ^ ((x) >> 3))
+
+/**
+ * @def SIG1(x)
+ * @brief σ1 message schedule function (rotations + shifts)
+ */
 #define SIG1(x)(ROTRIGHT(x,17) ^ ROTRIGHT(x,19) ^ ((x) >> 10))
 
 
-// SHA-256 constant table (64 round constants) from FIPS-180-4 specification
+/**
+ * @brief SHA-256 round constants from FIPS-180-4
+ *
+ * These 32-bit constants are added during each of the 64 compression rounds
+ */
 static const WORD k[64] = {
   0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
   0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
@@ -30,25 +82,36 @@ static const WORD k[64] = {
 };
 
 
-// core SHA-256 transformation (processes one 512-bit block)
+/**
+ * @brief Core SHA-256 compression function
+ *
+ * Processes exactly one 512-bit block (64 bytes) from @p data, updating the
+ * internal working state stored in @p ctx
+ *
+ * @param ctx  Pointer to SHA-256 context whose state will be updated
+ * @param data A 64-byte block of message data
+ *
+ * @note This function is called internally by sha256_update() and sha256_final()
+ *       Users should never call it directly
+ */
 void sha256_transform(SHA256_CTX *ctx, const BYTE data[]) {
   WORD a, b, c, d, e, f, g, h, t1, t2, m[64];
   WORD i, j;
 
-  // Step 1: Load first 16 words
+  // Load first 16 words (big endian)
   for (i = 0, j = 0; i < 16; ++i, j += 4) {
     m[i] = (data[j] << 24) |
            (data[j+1] << 16) |
            (data[j+2] <<  8) |
            (data[j+3]);
   }
-  
-  // Step 2: Expand to 64 words
+
+  // Extend message schedule to 64 words
   for (; i < 64; ++i) {
     m[i] = SIG1(m[i-2]) + m[i-7] + SIG0(m[i-15]) + m[i-16];
   }
 
-  // Step 3: Initialize working vars
+  // Initialize working variables
   a = ctx->state[0];
   b = ctx->state[1];
   c = ctx->state[2];
@@ -58,7 +121,7 @@ void sha256_transform(SHA256_CTX *ctx, const BYTE data[]) {
   g = ctx->state[6];
   h = ctx->state[7];
 
-  // Step 4: 64 rounds
+  // The 64 compression rounds
   for (i = 0; i < 64; ++i) {
     t1 = h + EP1(e) + CH(e,f,g) + k[i] + m[i];
     t2 = EP0(a) + MAJ(a,b,c);
@@ -73,7 +136,7 @@ void sha256_transform(SHA256_CTX *ctx, const BYTE data[]) {
     a = t1 + t2;
   }
 
-  // Step 5: Update state
+  // Add results back to the context state
   ctx->state[0] += a;
   ctx->state[1] += b;
   ctx->state[2] += c;
@@ -84,11 +147,18 @@ void sha256_transform(SHA256_CTX *ctx, const BYTE data[]) {
   ctx->state[7] += h;
 }
 
-// Initialize SHA-256 context
+/**
+ * @brief Initialize the SHA-256 hashing context
+ *
+ * Sets the starting hash values (initial vector) and resets internal counters
+ *
+ * @param ctx Pointer to an allocated SHA256_CTX structure
+ */
 void sha256_init(SHA256_CTX *ctx) {
   ctx->datalen = 0;
   ctx->bitlen  = 0;
 
+  // Initial hash values (H0..H7)
   ctx->state[0] = 0x6a09e667;
   ctx->state[1] = 0xbb67ae85;
   ctx->state[2] = 0x3c6ef372;
@@ -99,8 +169,16 @@ void sha256_init(SHA256_CTX *ctx) {
   ctx->state[7] = 0x5be0cd19;
 }
 
-
-// Update function (process input data in chunks)
+/**
+ * @brief Feed data into the SHA-256 state
+ *
+ * Accepts arbitrary-length message data Internally buffers bytes until
+ * a 64-byte block is full, at which point sha256_transform() is called
+ *
+ * @param ctx  Pointer to initialized SHA-256 context
+ * @param data Byte array with message data
+ * @param len  Number of bytes in @p data
+ */
 void sha256_update(SHA256_CTX *ctx, const BYTE data[], size_t len) {
   WORD i;
 
@@ -108,37 +186,43 @@ void sha256_update(SHA256_CTX *ctx, const BYTE data[], size_t len) {
     ctx->data[ctx->datalen] = data[i];
     ctx->datalen++;
 
-    // Block full → compress
+    // Process full block
     if (ctx->datalen == 64) {
       sha256_transform(ctx, ctx->data);
-      ctx->bitlen += 512;   // processed 512 bits
+      ctx->bitlen += 512;
       ctx->datalen = 0;
     }
   }
 }
 
-
-// Finalize and output digest
+/**
+ * @brief Finalize the SHA-256 digest and write the output hash
+ *
+ * Performs padding, processes any remaining data, and writes the
+ * final 32-byte hash into @p hash in big-endian order
+ *
+ * @param ctx   Pointer to SHA-256 context
+ * @param hash  Output buffer of 32 bytes
+ *
+ * @note After calling this the context should not be reused unless re-initialized
+ */
 void sha256_final(SHA256_CTX *ctx, BYTE hash[]) {
   WORD i = ctx->datalen;
 
-  // padding: add 0x80 byte
+  // Append 0x80 byte 
   ctx->data[i++] = 0x80;
 
-  // pad with zeros until 56 bytes reached
+  // Pad with zeros to 56 bytes
   if (ctx->datalen < 56) {
     while (i < 56) ctx->data[i++] = 0x00;
-  } 
-  else {
+  } else {
     while (i < 64) ctx->data[i++] = 0x00;
     sha256_transform(ctx, ctx->data);
     memset(ctx->data, 0, 56);
   }
 
- 
-  // append total bit length (big-endian)
+  // Final message length in bits (big endian)
   ctx->bitlen += ctx->datalen * 8;
-
   ctx->data[63] = ctx->bitlen;
   ctx->data[62] = ctx->bitlen >> 8;
   ctx->data[61] = ctx->bitlen >> 16;
@@ -150,8 +234,7 @@ void sha256_final(SHA256_CTX *ctx, BYTE hash[]) {
 
   sha256_transform(ctx, ctx->data);
 
-
-  // convert final state to big-endian hash output
+  // Convert state to final hash (big endian)
   for (i = 0; i < 4; ++i) {
     hash[i]      = (ctx->state[0] >> (24 - i*8)) & 0xff;
     hash[i + 4]  = (ctx->state[1] >> (24 - i*8)) & 0xff;
@@ -163,4 +246,3 @@ void sha256_final(SHA256_CTX *ctx, BYTE hash[]) {
     hash[i + 28] = (ctx->state[7] >> (24 - i*8)) & 0xff;
   }
 }
-
