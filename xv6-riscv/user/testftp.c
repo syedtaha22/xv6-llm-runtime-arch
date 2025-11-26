@@ -42,11 +42,8 @@ static int test_fetch_file(uint8_t file_id, const char* file_name) {
 
   /* Verify the hash */
   unsigned char hash[32];
-  SHA256_CTX ctx;
 
-  sha256_init(&ctx);
-  sha256_update(&ctx, (unsigned char*)file_data, file_size);
-  sha256_final(&ctx, hash);
+  sha256_hash((unsigned char*)file_data, file_size, hash);
 
   sha256_to_hex(hash, hex);
 
@@ -72,7 +69,7 @@ int main(int argc, char* argv[]) {
 
 
   if (test_fetch_file(FILE_TOKENIZER, "tokenizer") < 0) failed = 1;
-  
+
   info(0, "---");
 
   if (test_fetch_file(FILE_WEIGHTS, "weights") < 0) failed = 1;
