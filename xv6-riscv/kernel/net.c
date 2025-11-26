@@ -165,7 +165,9 @@ netinit(void)
  * - The binding process gains exclusive rights to receive from this port
  * 
  * @return uint64 Returns 0 on successful port binding, -1 on failure due to:
+ * 
  *   - Invalid port number (out of range 0-65535)
+ * 
  *   - Port already in use by another process
  * 
  * @note This implementation uses per-port locking rather than a global network lock,
