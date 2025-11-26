@@ -4,7 +4,7 @@
 
 #include <stdarg.h>
 
-static char digits[] = "0123456789ABCDEF";
+static char digits[] = "0123456789abcdef";
 
 // ----- indentation control -----
 static int print_indent_level = 0;
