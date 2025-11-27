@@ -1,93 +1,184 @@
+/**
+ * @file sha256.c
+ * @brief SHA-256 cryptographic hash function implementation for xv6-riscv
+ *
+ * @author @cybermeen
+ * @date 26th Nov 2025
+ *
+ * @details
+ * This file provides a full implementation of the SHA-256 hash algorithm
+ * optimized for the xv6-riscv operating system. It uses a 16-element rotating
+ * buffer technique to minimize stack usage and memory footprint while computing
+ * hashes of arbitrary-length messages. The implementation includes functions
+ * for:
+ * - Initializing the hash context (`sha256_init`)
+ * - Incrementally updating the hash with new data (`sha256_update`)
+ * - Finalizing the hash computation with proper padding (`sha256_final`)
+ * - Converting the resulting 32-byte hash to a hexadecimal string (`sha256_to_hex`)
+ * - Printing the hash in human-readable hexadecimal format (`sha256_print`)
+ *
+ * The algorithm follows the standard SHA-256 specification, handling data
+ * in 512-bit (64-byte) blocks. It supports large messages and ensures correct
+ * padding, bit-length encoding, and endianness for producing consistent
+ * cryptographic digests. This implementation is suitable for file integrity
+ * checks, authentication, and other cryptographic operations in resource-limited
+ * environments like xv6.
+ *
+ * @note Draws inspiration from https://lucidar.me/en/dev-c-cpp/sha-256-in-c-cpp/
+ */
+
 #include "sha256.h"
 
-// bit rotations macros
-#define ROTLEFT(a,b)  (((a) << (b)) | ((a) >> (32 - (b))))
+ // Rotate right
 #define ROTRIGHT(a,b) (((a) >> (b)) | ((a) << (32 - (b))))
 
-
-// MAJ / CH — SHA-256 boolean functions
-#define CH(x,y,z)  (((x) & (y)) ^ (~(x) & (z)))
-#define MAJ(x,y,z) (((x) & (y)) ^ ((x) & (z)) ^ ((y) & (z)))
-
-
 // Σ-functions — mixes bits by rotating and shifting
-#define EP0(x) (ROTRIGHT(x,2)  ^ ROTRIGHT(x,13) ^ ROTRIGHT(x,22))
-#define EP1(x) (ROTRIGHT(x,6)  ^ ROTRIGHT(x,11) ^ ROTRIGHT(x,25))
-#define SIG0(x)(ROTRIGHT(x,7)  ^ ROTRIGHT(x,18) ^ ((x) >> 3))
-#define SIG1(x)(ROTRIGHT(x,17) ^ ROTRIGHT(x,19) ^ ((x) >> 10))
+#define SIG0(x) (ROTRIGHT(x,7)  ^ ROTRIGHT(x,18) ^ ((x) >> 3))
+#define SIG1(x) (ROTRIGHT(x,17) ^ ROTRIGHT(x,19) ^ ((x) >> 10))
+#define STEP1(e, f, g) (ROTRIGHT(e, 6) ^ ROTRIGHT(e, 11) ^ ROTRIGHT(e, 25)) + ((e & f) ^ ((~e) & g))
+#define STEP2(a, b, c) (ROTRIGHT(a, 2) ^ ROTRIGHT(a, 13) ^ ROTRIGHT(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))
 
-
-// SHA-256 constant table (64 round constants) from FIPS-180-4 specification
-static const WORD k[64] = {
-  0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
-  0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
-  0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
-  0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
-  0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
-  0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
-  0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
-  0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
-};
-
-
-// core SHA-256 transformation (processes one 512-bit block)
-void sha256_transform(SHA256_CTX *ctx, const BYTE data[]) {
-  WORD a, b, c, d, e, f, g, h, t1, t2, m[64];
-  WORD i, j;
-
-  // Step 1: Load first 16 words
-  for (i = 0, j = 0; i < 16; ++i, j += 4) {
-    m[i] = (data[j] << 24) |
-           (data[j+1] << 16) |
-           (data[j+2] <<  8) |
-           (data[j+3]);
+/**
+ * @brief Update the message schedule array for SHA-256 block processing.
+ * @param m Pointer to the 16-element message schedule array.
+ * @param i Current iteration index (0-63).
+ * @param buffer Pointer to the 64-byte input block.
+ *
+ * @details
+ * For i < 16, loads big-endian words from buffer.
+ * For i >= 16, computes the next word using SIG0 and SIG1 functions.
+ */
+static inline void update_m(uint32* m, int i, const uint8* buffer) {
+  int j;
+  for (j = 0; j < 16; j++) {
+    if (i < 16) {
+      m[j] = ((uint32)buffer[0] << 24) | ((uint32)buffer[1] << 16) |
+        ((uint32)buffer[2] << 8) | ((uint32)buffer[3]);
+      buffer += 4;
+    }
+    else {
+      uint32 a = m[(j + 1) & 15];
+      uint32 b = m[(j + 14) & 15];
+      uint32 s0 = (SIG0(a));
+      uint32 s1 = (SIG1(b));
+      m[j] += m[(j + 9) & 15] + s0 + s1;
+    }
   }
-  
-  // Step 2: Expand to 64 words
-  for (; i < 64; ++i) {
-    m[i] = SIG1(m[i-2]) + m[i-7] + SIG0(m[i-15]) + m[i-16];
-  }
-
-  // Step 3: Initialize working vars
-  a = ctx->state[0];
-  b = ctx->state[1];
-  c = ctx->state[2];
-  d = ctx->state[3];
-  e = ctx->state[4];
-  f = ctx->state[5];
-  g = ctx->state[6];
-  h = ctx->state[7];
-
-  // Step 4: 64 rounds
-  for (i = 0; i < 64; ++i) {
-    t1 = h + EP1(e) + CH(e,f,g) + k[i] + m[i];
-    t2 = EP0(a) + MAJ(a,b,c);
-
-    h = g;
-    g = f;
-    f = e;
-    e = d + t1;
-    d = c;
-    c = b;
-    b = a;
-    a = t1 + t2;
-  }
-
-  // Step 5: Update state
-  ctx->state[0] += a;
-  ctx->state[1] += b;
-  ctx->state[2] += c;
-  ctx->state[3] += d;
-  ctx->state[4] += e;
-  ctx->state[5] += f;
-  ctx->state[6] += g;
-  ctx->state[7] += h;
 }
 
-// Initialize SHA-256 context
-void sha256_init(SHA256_CTX *ctx) {
+/**
+ * @brief Process a single 512-bit block through the SHA-256 compression function.
+ * @param ctx Pointer to SHA256_CTX containing the current state and data block.
+ *
+ * @details
+ * Updates the hash state by processing the current 64-byte data block using
+ * the SHA-256 round functions and constants.
+ */
+static void sha256_block(SHA256_CTX* ctx) {
+  // State of the program
+  uint32* state = ctx->state;
+
+  // Declare the K constant
+  static const uint32 k[64] = {
+    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+  };
+
+  uint32 lo[4], hi[4];
+  for (int i = 0; i < 4; i++) {
+    lo[i] = state[i];
+    hi[i] = state[i + 4];
+  }
+
+  uint32 m[16];  // Only 16 elements instead of 64!
+
+  int i, j;
+  for (i = 0; i < 64; i += 16) {
+    update_m(m, i, ctx->data);
+
+    for (j = 0; j < 16; j += 4) {
+      uint32 temp;
+
+      /// @todo Merge into a single loop
+      temp = hi[3] + STEP1(hi[0], hi[1], hi[2]) + k[i + j + 0] + m[j + 0];
+      hi[3] = temp + lo[3];
+      lo[3] = temp + STEP2(lo[0], lo[1], lo[2]);
+
+      temp = hi[2] + STEP1(hi[3], hi[0], hi[1]) + k[i + j + 1] + m[j + 1];
+      hi[2] = temp + lo[2];
+      lo[2] = temp + STEP2(lo[3], lo[0], lo[1]);
+
+      temp = hi[1] + STEP1(hi[2], hi[3], hi[0]) + k[i + j + 2] + m[j + 2];
+      hi[1] = temp + lo[1];
+      lo[1] = temp + STEP2(lo[2], lo[3], lo[0]);
+
+      temp = hi[0] + STEP1(hi[1], hi[2], hi[3]) + k[i + j + 3] + m[j + 3];
+      hi[0] = temp + lo[0];
+      lo[0] = temp + STEP2(lo[1], lo[2], lo[3]);
+    }
+  }
+
+  // Add lo[] back into state
+  for (int i = 0; i < 4; i++) {
+    state[i] += lo[i];
+    state[i + 4] += hi[i];
+  }
+
+}
+
+/**
+ * @brief Append a single byte to the SHA-256 context data buffer.
+ * @param ctx Pointer to SHA256_CTX.
+ * @param byte The byte to append.
+ *
+ * @details
+ * Adds the byte to the data buffer and increments bit length.
+ * If the buffer becomes full (64 bytes), processes the block.
+ */
+static void sha256_append_byte(SHA256_CTX* ctx, uint8 byte) {
+  ctx->data[ctx->datalen++] = byte;
+  ctx->bitlen += 8;
+
+  if (ctx->datalen == 64) {
+    ctx->datalen = 0;
+    sha256_block(ctx);
+  }
+}
+
+/**
+ * @brief Finalize the SHA-256 hash by padding the message.
+ * @param ctx Pointer to SHA256_CTX.
+ *
+ * @details
+ * Appends the padding bit (0x80), zero padding, and the original message
+ * length in bits (big-endian) to complete the hash computation.
+ */
+static void sha256_finalize(SHA256_CTX* ctx) {
+  int i;
+  uint64 n_bits = ctx->bitlen;  // Save bitlen BEFORE padding
+
+  sha256_append_byte(ctx, 0x80);
+
+  while (ctx->datalen != 56) {
+    sha256_append_byte(ctx, 0);
+  }
+
+  // Append the saved bit length (big-endian)
+  for (i = 7; i >= 0; i--) {
+    uint8 byte = (n_bits >> (8 * i)) & 0xff;
+    sha256_append_byte(ctx, byte);
+  }
+}
+
+void sha256_init(SHA256_CTX* ctx) {
   ctx->datalen = 0;
-  ctx->bitlen  = 0;
+  ctx->bitlen = 0;
 
   ctx->state[0] = 0x6a09e667;
   ctx->state[1] = 0xbb67ae85;
@@ -99,102 +190,47 @@ void sha256_init(SHA256_CTX *ctx) {
   ctx->state[7] = 0x5be0cd19;
 }
 
+void sha256_update(SHA256_CTX* ctx, const BYTE data[], uint32 len) {
+  uint32 i;
+  const uint8* bytes = (const uint8*)data;
 
-// Update function (process input data in chunks)
-void sha256_update(SHA256_CTX *ctx, const BYTE data[], size_t len) {
-  WORD i;
+  for (i = 0; i < len; i++) {
+    sha256_append_byte(ctx, bytes[i]);
+  }
+}
 
-  for (i = 0; i < len; ++i) {
-    ctx->data[ctx->datalen] = data[i];
-    ctx->datalen++;
+void sha256_final(SHA256_CTX* ctx, BYTE hash[]) {
+  int i, j;
+  sha256_finalize(ctx);
 
-    // Block full → compress
-    if (ctx->datalen == 64) {
-      sha256_transform(ctx, ctx->data);
-      ctx->bitlen += 512;   // processed 512 bits
-      ctx->datalen = 0;
+  // Convert state to big-endian hash output
+  uint8* ptr = (uint8*)hash;
+  for (i = 0; i < 8; i++) {
+    for (j = 3; j >= 0; j--) {
+      *ptr++ = (ctx->state[i] >> (j * 8)) & 0xff;
     }
   }
 }
 
-
-// Finalize and output digest
-void sha256_final(SHA256_CTX *ctx, BYTE hash[]) {
-  WORD i = ctx->datalen;
-
-  // padding: add 0x80 byte
-  ctx->data[i++] = 0x80;
-
-  // pad with zeros until 56 bytes reached
-  if (ctx->datalen < 56) {
-    while (i < 56) ctx->data[i++] = 0x00;
-  } 
-  else {
-    while (i < 64) ctx->data[i++] = 0x00;
-    sha256_transform(ctx, ctx->data);
-    memset(ctx->data, 0, 56);
-  }
-
- 
-  // append total bit length (big-endian)
-  ctx->bitlen += ctx->datalen * 8;
-
-  ctx->data[63] = ctx->bitlen;
-  ctx->data[62] = ctx->bitlen >> 8;
-  ctx->data[61] = ctx->bitlen >> 16;
-  ctx->data[60] = ctx->bitlen >> 24;
-  ctx->data[59] = ctx->bitlen >> 32;
-  ctx->data[58] = ctx->bitlen >> 40;
-  ctx->data[57] = ctx->bitlen >> 48;
-  ctx->data[56] = ctx->bitlen >> 56;
-
-  sha256_transform(ctx, ctx->data);
-
-
-  // convert final state to big-endian hash output
-  for (i = 0; i < 4; ++i) {
-    hash[i]      = (ctx->state[0] >> (24 - i*8)) & 0xff;
-    hash[i + 4]  = (ctx->state[1] >> (24 - i*8)) & 0xff;
-    hash[i + 8]  = (ctx->state[2] >> (24 - i*8)) & 0xff;
-    hash[i + 12] = (ctx->state[3] >> (24 - i*8)) & 0xff;
-    hash[i + 16] = (ctx->state[4] >> (24 - i*8)) & 0xff;
-    hash[i + 20] = (ctx->state[5] >> (24 - i*8)) & 0xff;
-    hash[i + 24] = (ctx->state[6] >> (24 - i*8)) & 0xff;
-    hash[i + 28] = (ctx->state[7] >> (24 - i*8)) & 0xff;
-  }
+void sha256_hash(const BYTE data[], uint32 len, BYTE hash[32]) {
+  SHA256_CTX ctx;
+  sha256_init(&ctx);
+  sha256_update(&ctx, data, len);
+  sha256_final(&ctx, hash);
 }
 
-/**
- * @brief Convert a 32-byte SHA-256 hash to a 64-character hex string.
- * @param hash Input hash (32 bytes).
- * @param hex Output buffer (must be at least 65 bytes for null terminator).
- * 
- * @details
- * Converts each byte to two hexadecimal characters (lowercase).
- * The output string is null-terminated.
- */
 void sha256_to_hex(const BYTE hash[32], char hex[65]) {
   const char hex_chars[] = "0123456789abcdef";
   for (int i = 0; i < 32; i++) {
-    hex[i*2] = hex_chars[(hash[i] >> 4) & 0x0F];
-    hex[i*2 + 1] = hex_chars[hash[i] & 0x0F];
+    hex[i * 2] = hex_chars[(hash[i] >> 4) & 0x0F];
+    hex[i * 2 + 1] = hex_chars[hash[i] & 0x0F];
   }
   hex[64] = '\0';
 }
 
-/**
- * @brief Print a 32-byte SHA-256 hash in hexadecimal format.
- * @param hash The hash to print (32 bytes).
- * 
- * @details
- * Prints the hash as a continuous 64-character hex string with no newline.
- * Uses printf to output directly to console.
- */
 void sha256_print(const BYTE hash[32]) {
   for (int i = 0; i < 32; i++) {
     if (hash[i] < 16) printf("0");
     printf("%x", hash[i]);
   }
 }
-
-

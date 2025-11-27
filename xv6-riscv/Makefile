@@ -158,10 +158,10 @@ $U/_testftp: $U/testftp.o $(ULIB) $U/ftpclient.o $U/sha256.o
 	$(OBJDUMP) -S $@ > $U/testftp.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/testftp.sym
 
-$U/_testsha256: $U/testsha256.o $(ULIB) $U/sha256.o
-	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/testsha256.o $(ULIB) $U/sha256.o
-	$(OBJDUMP) -S $@ > $U/testsha256.asm
-	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/testsha256.sym
+$U/_testsha: $U/testsha.o $(ULIB) $U/sha256.o
+	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/testsha.o $(ULIB) $U/sha256.o
+	$(OBJDUMP) -S $@ > $U/testsha.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/testsha.sym
 
 _%: %.o $(ULIB) $U/user.ld
 	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $< $(ULIB)
@@ -218,7 +218,7 @@ UPROGS=\
 	$U/_testxstdlib\
 	$U/_testxmath\
 	$U/_testxstrlib\
-	$U/_testsha256\
+	$U/_testsha\
 
 
 
