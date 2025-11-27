@@ -35,3 +35,9 @@
 #define SYS_recv      32
 #define SYS_pgpte     33
 #define SYS_kpgtbl    34
+
+// Shared memory syscalls
+#define SYS_shmget    35
+#define SYS_shmat     36
+#define SYS_shmdt     37
+#define SYS_shmctl    38

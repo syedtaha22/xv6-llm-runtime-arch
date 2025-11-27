@@ -44,6 +44,18 @@ uint64 pgpte(void*);
 void kpgtbl(void);
 #endif
 
+// Shared memory functions
+#define SHM_PERSIST 0x01
+#define SHM_RDONLY 0x01
+#define SHM_RDWR 0x02
+#define IPC_CREAT 0x1000
+#define IPC_EXCL 0x2000
+#define IPC_RMID 0
+int shmget(const char*, uint64, int);
+void* shmat(int, void*, int);
+int shmdt(void*);
+int shmctl(int, int, void*);
+
 // ulib.c
 int stat(const char*, struct stat*);
 char* strcpy(char*, const char*);

@@ -345,6 +345,9 @@ kexit(int status)
   end_op();
   p->cwd = 0;
 
+  // Clean up shared memory attachments
+  shm_cleanup_proc(p);
+
   acquire(&wait_lock);
 
   // Give any children to init.

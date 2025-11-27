@@ -20,6 +20,7 @@ OBJS = \
   $K/trap.o \
   $K/syscall.o \
   $K/sysproc.o \
+  $K/shm.o \
   $K/bio.o \
   $K/fs.o \
   $K/log.o \
@@ -219,6 +220,7 @@ UPROGS=\
 	$U/_testxmath\
 	$U/_testxstrlib\
 	$U/_testsha\
+	$U/_testshm\
 
 
 

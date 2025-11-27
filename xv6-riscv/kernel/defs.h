@@ -227,6 +227,14 @@ int             snprintf(char*, unsigned long, const char*, ...);
 void            kcsaninit();
 #endif
 
+// Shared memory functions
+void            shm_init(void);
+int             shm_get(char *name, uint64 size, int flags);
+void*           shm_attach(int shmid, void *uaddr, int flags);
+int             shm_detach(void *shmaddr);
+int             shmctl(int shmid, int cmd, void *buf);
+void            shm_cleanup_proc(struct proc *p);
+
 #ifdef LAB_NET
 // pci.c
 void            pci_init();
