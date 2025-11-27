@@ -1,13 +1,13 @@
 /**
  * @file sha256.h
- * @brief SHA-256 cryptographic hash function implementation for xv6-riscv
+ * @brief SHA-256 cryptographic hash function implementation for xv6-riscv kernel
  *
  * @author @cybermeen
  * @date 26th Nov 2025
  *
  * @details
  * This header defines the structures and function prototypes for computing
- * SHA-256 hashes within the xv6-riscv operating system environment. SHA-256
+ * SHA-256 hashes within the xv6-riscv kernel. SHA-256
  * is a widely used cryptographic hash function that produces a fixed-size
  * 256-bit (32-byte) digest from an arbitrary-length input. This implementation
  * supports incremental hashing, allowing large messages or files to be processed
@@ -25,7 +25,7 @@
  * This implementation ensures compatibility with standard SHA-256 outputs and
  * allows hashing of files, network streams, or any data that can be processed
  * in memory-limited environments. It is suitable for verifying file integrity,
- * authentication, and other cryptographic applications within xv6-riscv.
+ * authentication, and other cryptographic applications within xv6-riscv kernel.
  *
  * @note Draws inspiration from https://lucidar.me/en/dev-c-cpp/sha-256-in-c-cpp/
  */
@@ -33,10 +33,9 @@
 #ifndef SHA256_H
 #define SHA256_H
 
-#include "kernel/types.h"
-#include "user.h"
+#include "types.h"
 
- // Basic integer typedefs
+// Basic integer typedefs
 typedef unsigned char BYTE;   // 8-bit
 typedef uint32 WORD;          // 32-bit (using xv6's uint32)
 

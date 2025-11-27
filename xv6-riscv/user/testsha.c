@@ -20,8 +20,9 @@
 
 #include "kernel/types.h"
 #include "user.h"
-#include "sha256.h"
 #include "testutil.h"
+
+typedef unsigned char BYTE;
 
  /**
   * @brief Convert two hexadecimal characters into a byte.
@@ -75,16 +76,21 @@ int hashes_equal(BYTE h1[32], BYTE h2[32]) {
 int run_test_buf(int test_num, char* title, const unsigned char* buf, int len, const char* expected_hex) {
   BYTE hash[32];
   BYTE expected[32];
-  char hex_output[65];
 
-  sha256_hash((BYTE*)buf, len, hash);
+  if (sha256(buf, len, hash) != 0) {
+    failnoex(0, "sha256 syscall failed\n");
+    return 1;
+  }
 
   hex_to_bytes(expected_hex, expected);
 
   info(0, title);
   printf("  Input length: %d bytes\n", len);
   printf("  SHA256: ");
-  sha256_print(hash);
+  for (int i = 0; i < 32; i++) {
+    if (hash[i] < 16) printf("0");
+    printf("%x", hash[i]);
+  }
   printf("\n");
 
   if (hashes_equal(hash, expected)) {
@@ -92,8 +98,11 @@ int run_test_buf(int test_num, char* title, const unsigned char* buf, int len, c
     return 0;
   }
   else {
-    sha256_to_hex(hash, hex_output);
-    printf("  Computed: %s\n", hex_output);
+    for (int i = 0; i < 32; i++) {
+      if (hash[i] < 16) printf("0");
+      printf("%x", hash[i]);
+    }
+    printf("\n");
     printf("  Expected: %s\n", expected_hex);
     failnoex(0, "Hash mismatch\n");
     return 1;

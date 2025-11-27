@@ -28,6 +28,7 @@ OBJS = \
   $K/pipe.o \
   $K/exec.o \
   $K/sysfile.o \
+  $K/sha256.o \
   $K/kernelvec.o \
   $K/plic.o \
   $K/virtio_disk.o
@@ -153,13 +154,13 @@ ULIB += $U/statistics.o
 endif
 
 # Special programs that need additional libraries
-$U/_testftp: $U/testftp.o $(ULIB) $U/ftpclient.o $U/sha256.o
-	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/testftp.o $(ULIB) $U/ftpclient.o $U/sha256.o
+$U/_testftp: $U/testftp.o $(ULIB) $U/ftpclient.o
+	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/testftp.o $(ULIB) $U/ftpclient.o
 	$(OBJDUMP) -S $@ > $U/testftp.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/testftp.sym
 
-$U/_testsha: $U/testsha.o $(ULIB) $U/sha256.o
-	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/testsha.o $(ULIB) $U/sha256.o
+$U/_testsha: $U/testsha.o $(ULIB)
+	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/testsha.o $(ULIB)
 	$(OBJDUMP) -S $@ > $U/testsha.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/testsha.sym
 

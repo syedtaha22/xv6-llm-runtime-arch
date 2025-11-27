@@ -1,13 +1,13 @@
 /**
  * @file sha256.c
- * @brief SHA-256 cryptographic hash function implementation for xv6-riscv
+ * @brief SHA-256 cryptographic hash function implementation for xv6-riscv kernel
  *
  * @author @cybermeen
  * @date 26th Nov 2025
  *
  * @details
  * This file provides a full implementation of the SHA-256 hash algorithm
- * optimized for the xv6-riscv operating system. It uses a 16-element rotating
+ * optimized for the xv6-riscv kernel. It uses a 16-element rotating
  * buffer technique to minimize stack usage and memory footprint while computing
  * hashes of arbitrary-length messages. The implementation includes functions
  * for:
@@ -28,8 +28,10 @@
  */
 
 #include "sha256.h"
+#include "riscv.h"
+#include "defs.h"
 
- // Rotate right
+// Rotate right
 #define ROTRIGHT(a,b) (((a) >> (b)) | ((a) << (32 - (b))))
 
 // Σ-functions — mixes bits by rotating and shifting
@@ -97,7 +99,6 @@ static void sha256_block(SHA256_CTX* ctx) {
   }
 
   uint32 m[16];  // Only 16 elements instead of 64!
-
   int i, j;
   for (i = 0; i < 64; i += 16) {
     update_m(m, i, ctx->data);

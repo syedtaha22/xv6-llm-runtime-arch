@@ -15,7 +15,6 @@
 #include "user.h"
 #include "ftpclient.h"
 #include "testutil.h"
-#include "sha256.h"
 #include "xstrlib.h"
 
  /**
@@ -43,9 +42,18 @@ static int test_fetch_file(uint8_t file_id, const char* file_name) {
   /* Verify the hash */
   unsigned char hash[32];
 
-  sha256_hash((unsigned char*)file_data, file_size, hash);
+  if (sha256(file_data, file_size, hash) != 0) {
+    failnoex(1, "sha256 syscall failed");
+    return -1;
+  }
 
-  sha256_to_hex(hash, hex);
+  // Convert to hex
+  const char hex_chars[] = "0123456789abcdef";
+  for (int i = 0; i < 32; i++) {
+    hex[i * 2] = hex_chars[(hash[i] >> 4) & 0x0F];
+    hex[i * 2 + 1] = hex_chars[hash[i] & 0x0F];
+  }
+  hex[64] = '\0';
 
   xsprintf(buf, "Final SHA-256: %s", hex);
   info(2, buf);

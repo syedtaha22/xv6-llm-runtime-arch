@@ -115,6 +115,7 @@ extern uint64 sys_recv(void);
 extern uint64 sys_pgpte(void);
 extern uint64 sys_kpgtbl(void);
 #endif
+extern uint64 sys_sha256(void);
 
 // An array mapping syscall numbers from syscall.h
 // to the function that handles the system call.
@@ -150,6 +151,7 @@ static uint64 (*syscalls[])(void) = {
 [SYS_pgpte] sys_pgpte,
 [SYS_kpgtbl] sys_kpgtbl,
 #endif
+[SYS_sha256] sys_sha256,
 };
 
 

@@ -6,6 +6,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "vm.h"
+#include "sha256.h"
 
 uint64
 sys_exit(void)
@@ -106,4 +107,49 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
+}
+
+uint64
+sys_sha256(void)
+{
+  uint64 addr;
+  int len;
+  uint64 out_addr;
+  char *data;
+  SHA256_CTX ctx;
+
+  argaddr(0, &addr);
+  argint(1, &len);
+  argaddr(2, &out_addr);
+
+  if (len < 0)
+    return -1;
+
+  data = kalloc();
+  if (!data)
+    return -1;
+
+  sha256_init(&ctx);
+
+  uint64 offset = 0;
+  while (len > 0) {
+    int chunk = len > 4096 ? 4096 : len;
+    if (copyin(myproc()->pagetable, data, addr + offset, chunk) < 0) {
+      kfree(data);
+      return -1;
+    }
+    sha256_update(&ctx, (const BYTE*)data, chunk);
+    offset += chunk;
+    len -= chunk;
+  }
+
+  kfree(data);
+
+  uint8 hash[32];
+  sha256_final(&ctx, hash);
+
+  if (copyout(myproc()->pagetable, out_addr, (char*)hash, 32) < 0)
+    return -1;
+
+  return 0;
 }

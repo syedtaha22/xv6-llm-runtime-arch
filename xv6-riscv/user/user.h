@@ -43,6 +43,7 @@ int ugetpid(void);
 uint64 pgpte(void*);
 void kpgtbl(void);
 #endif
+int sha256(const void*, int, void*);
 
 // ulib.c
 int stat(const char*, struct stat*);

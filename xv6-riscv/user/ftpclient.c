@@ -21,7 +21,6 @@
 #include "kernel/types.h"
 #include "user.h"
 #include "ftpclient.h"
-#include "sha256.h"
 
  /**
   * @struct transfer_ctx_t
@@ -365,14 +364,27 @@ static int handle_missing_chunks(transfer_ctx_t* ctx, uint8_t file_id, uint16_t 
 static int verify_file_integrity(char* file_buf, int file_size, unsigned char* expected_hash) {
   unsigned char computed_hash[32];
 
-  sha256_hash((unsigned char*)file_buf, file_size, computed_hash);
+  if (sha256(file_buf, file_size, computed_hash) != 0) {
+    printf("sha256 syscall failed\n");
+    return 0;
+  }
 
   if (memcmp(computed_hash, expected_hash, 32) != 0) {
     // print the hash
+    /// @todo Remove redundant code
     char hex[65];
-    sha256_to_hex(computed_hash, hex);
+    const char hex_chars[] = "0123456789abcdef";
+    for (int i = 0; i < 32; i++) {
+      hex[i * 2] = hex_chars[(computed_hash[i] >> 4) & 0x0F];
+      hex[i * 2 + 1] = hex_chars[computed_hash[i] & 0x0F];
+    }
+    hex[64] = '\0';
     printf("Computed SHA-256: %s\n", hex);
-    sha256_to_hex(expected_hash, hex);
+    for (int i = 0; i < 32; i++) {
+      hex[i * 2] = hex_chars[(expected_hash[i] >> 4) & 0x0F];
+      hex[i * 2 + 1] = hex_chars[expected_hash[i] & 0x0F];
+    }
+    hex[64] = '\0';
     printf("Expected SHA-256: %s\n", hex);
     return 0; // Hash mismatch
   }
