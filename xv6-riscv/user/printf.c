@@ -4,12 +4,31 @@
 
 #include <stdarg.h>
 
-static char digits[] = "0123456789ABCDEF";
+static char digits[] = "0123456789abcdef";
+
+// ----- indentation control -----
+static int print_indent_level = 0;
+
+// Set indentation width in spaces
+void printf_set_indent(int spaces) {
+  if (spaces < 0) spaces = 0;
+  print_indent_level = spaces;
+}
+
+// Reset indentation to zero
+void printf_reset_indent(void) {
+  print_indent_level = 0;
+}
 
 static void
 putc(int fd, char c)
 {
   write(fd, &c, 1);
+}
+
+static void print_indent(int fd) {
+  for (int i = 0; i < print_indent_level; i++)
+    putc(fd, ' ');
 }
 
 static void
@@ -38,6 +57,26 @@ printint(int fd, long long xx, int base, int sgn)
     putc(fd, buf[i]);
 }
 
+// For doubles
+static void
+printdouble(int fd, double d) {
+  if (d < 0) {
+    putc(fd, '-');
+    d = -d;
+  }
+  long long intpart = (long long)d;
+  double fracpart = d - (double)intpart;
+  printint(fd, intpart, 10, 0);
+  putc(fd, '.');
+  // Print 6 digits of fractional part
+  for (int i = 0; i < 6; i++) {
+    fracpart *= 10;
+    int digit = (int)fracpart;
+    putc(fd, '0' + digit);
+    fracpart -= digit;
+  }
+}
+
 static void
 printptr(int fd, uint64 x) {
   int i;
@@ -53,10 +92,18 @@ vprintf(int fd, const char *fmt, va_list ap)
 {
   char *s;
   int c0, c1, c2, i, state;
+  int at_line_start = 1;
 
   state = 0;
   for(i = 0; fmt[i]; i++){
     c0 = fmt[i] & 0xff;
+
+    // apply indent at start of line
+    if (at_line_start && c0 != '\n') {
+      print_indent(fd);
+      at_line_start = 0;
+    }
+
     if(state == 0){
       if(c0 == '%'){
         state = '%';
@@ -100,6 +147,8 @@ vprintf(int fd, const char *fmt, va_list ap)
           s = "(null)";
         for(; *s; s++)
           putc(fd, *s);
+      } else if (c0 == 'f') {
+        printdouble(fd, va_arg(ap, double));
       } else if(c0 == '%'){
         putc(fd, '%');
       } else {

@@ -66,6 +66,7 @@ Each commit represents one logical, testable change. Use this structure:
 * The **subject line** must be under 72 characters.
 * Use **imperative mood** (“Add,” “Fix,” “Update”).
 * The **body** may explain *what* changed and *why*, when needed.
+* Wrap **body lines at 72 characters**.
 * Include references or related issues in the **footer**.
 * Do not commit untested or incomplete code.
 * Remove temporary, debug, or commented-out code before committing.

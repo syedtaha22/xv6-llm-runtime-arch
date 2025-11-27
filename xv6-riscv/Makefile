@@ -91,6 +91,8 @@ OBJDUMP = $(TOOLPREFIX)objdump
 CFLAGS = -Wall -Werror -O -fno-omit-frame-pointer -ggdb -gdwarf-2
 CFLAGS = -Wall -Werror -Wno-unknown-attributes -O -fno-omit-frame-pointer -ggdb -gdwarf-2
 
+XCFLAGS += -DSOL_COW -DLAB_COW
+
 ifdef LAB
 LABUPPER = $(shell echo $(LAB) | tr a-z A-Z)
 XCFLAGS += -DSOL_$(LABUPPER) -DLAB_$(LABUPPER)
@@ -144,11 +146,22 @@ $K/%.o: $K/%.S
 tags: $(OBJS)
 	etags kernel/*.S kernel/*.c
 
-ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o
+ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o $U/testutil.o $U/xstdlib.o $U/xmath.o $U/xstrlib.o
 
 ifeq ($(LAB),lock)
 ULIB += $U/statistics.o
 endif
+
+# Special programs that need additional libraries
+$U/_testftp: $U/testftp.o $(ULIB) $U/ftpclient.o $U/sha256.o
+	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/testftp.o $(ULIB) $U/ftpclient.o $U/sha256.o
+	$(OBJDUMP) -S $@ > $U/testftp.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/testftp.sym
+
+$U/_testsha: $U/testsha.o $(ULIB) $U/sha256.o
+	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/testsha.o $(ULIB) $U/sha256.o
+	$(OBJDUMP) -S $@ > $U/testsha.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/testsha.sym
 
 _%: %.o $(ULIB) $U/user.ld
 	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $< $(ULIB)
@@ -160,6 +173,9 @@ $U/usys.S : $U/usys.pl
 
 $U/usys.o : $U/usys.S
 	$(CC) $(CFLAGS) -c -o $U/usys.o $U/usys.S
+
+$U/xstdlib.o: $U/xstdlib.c $U/xstdlib.h
+	$(CC) $(CFLAGS) -c -o $U/xstdlib.o $U/xstdlib.c
 
 $U/_forktest: $U/forktest.o $(ULIB)
 	# forktest has less library code linked in - needs to be small
@@ -196,6 +212,13 @@ UPROGS=\
 	$U/_logstress\
 	$U/_forphan\
 	$U/_dorphan\
+	$U/_testftp\
+	$U/_fputest\
+	$U/_runtests\
+	$U/_testxstdlib\
+	$U/_testxmath\
+	$U/_testxstrlib\
+	$U/_testsha\
 
 
 
@@ -230,10 +253,7 @@ UPROGS += \
 	$U/_lazytests
 endif
 
-ifeq ($(LAB),cow)
-UPROGS += \
-	$U/_cowtest
-endif
+UPROGS += $U/_cowtest
 
 ifeq ($(LAB),thread)
 UPROGS += \
@@ -322,7 +342,7 @@ endif
 FWDPORT1 = $(shell expr `id -u` % 5000 + 25999)
 FWDPORT2 = $(shell expr `id -u` % 5000 + 30999)
 
-QEMUOPTS = -machine virt -bios none -kernel $K/kernel -m 128M -smp $(CPUS) -nographic
+QEMUOPTS = -machine virt -bios none -kernel $K/kernel -m 256M -smp $(CPUS) -nographic
 QEMUOPTS += -global virtio-mmio.force-legacy=false
 QEMUOPTS += -drive file=fs.img,if=none,format=raw,id=x0
 QEMUOPTS += -device virtio-blk-device,drive=x0,bus=virtio-mmio-bus.0

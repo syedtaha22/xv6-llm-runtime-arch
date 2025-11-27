@@ -282,6 +282,21 @@ r_time()
   return x;
 }
 
+// floating-point control and status register
+static inline void
+w_fcsr(uint64 x)
+{
+    asm volatile("csrw fcsr, %0" : : "r" (x));
+}
+
+static inline uint64
+r_fcsr()
+{
+    uint64 x;
+    asm volatile("csrr %0, fcsr" : "=r" (x));
+    return x;
+}
+
 // enable device interrupts
 static inline void
 intr_on()
