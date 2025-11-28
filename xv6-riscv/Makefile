@@ -164,6 +164,11 @@ $U/_testsha: $U/testsha.o $(ULIB) $U/sha256.o
 	$(OBJDUMP) -S $@ > $U/testsha.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/testsha.sym
 
+$U/_inference: $U/inference.o $(ULIB) $U/ftpclient.o $U/sha256.o
+	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/inference.o $(ULIB) $U/ftpclient.o $U/sha256.o
+	$(OBJDUMP) -S $@ > $U/inference.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/inference.sym
+
 _%: %.o $(ULIB) $U/user.ld
 	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $< $(ULIB)
 	$(OBJDUMP) -S $@ > $*.asm
@@ -221,6 +226,7 @@ UPROGS=\
 	$U/_testxstrlib\
 	$U/_testsha\
 	$U/_testshm\
+	$U/_inference\
 
 
 
