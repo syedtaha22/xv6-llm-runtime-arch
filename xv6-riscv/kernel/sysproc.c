@@ -6,6 +6,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "vm.h"
+#include "shm.h"
 
 uint64
 sys_exit(void)
@@ -106,4 +107,58 @@ sys_uptime(void)
   xticks = ticks;
   release(&tickslock);
   return xticks;
+}
+
+uint64
+sys_shmget(void)
+{
+  char name[SHM_NAME_LEN];
+  uint64 size;
+  int flags;
+
+  if (argstr(0, name, SHM_NAME_LEN) < 0)
+    return -1;
+
+  argaddr(1, &size);
+  argint(2, &flags);
+
+  return shm_get(name, size, flags);
+}
+
+uint64
+sys_shmat(void)
+{
+  int shmid;
+  uint64 uaddr;
+  int flags;
+
+  argint(0, &shmid);
+  argaddr(1, &uaddr);
+  argint(2, &flags);
+
+  return (uint64)shm_attach(shmid, (void*)uaddr, flags);
+}
+
+uint64
+sys_shmdt(void)
+{
+  uint64 shmaddr;
+
+  argaddr(0, &shmaddr);
+
+  return shm_detach((void*)shmaddr);
+}
+
+uint64
+sys_shmctl(void)
+{
+  int shmid;
+  int cmd;
+  uint64 buf;
+
+  argint(0, &shmid);
+  argint(1, &cmd);
+  argaddr(2, &buf);
+
+  return shmctl(shmid, cmd, (void*)buf);
 }

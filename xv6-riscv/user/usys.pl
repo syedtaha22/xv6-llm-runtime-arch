@@ -48,3 +48,7 @@ entry("send");
 entry("recv");
 entry("pgpte");
 entry("kpgtbl");
+entry("shmget");
+entry("shmat");
+entry("shmdt");
+entry("shmctl");
