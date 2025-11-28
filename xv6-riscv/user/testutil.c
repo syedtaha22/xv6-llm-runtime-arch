@@ -13,6 +13,7 @@
 #include "kernel/types.h"
 #include "user/user.h"
 #include "testutil.h"
+#include <stdarg.h>
 
 #define ANSI_RED     "\033[31m"
 #define ANSI_GREEN   "\033[32m"
@@ -27,36 +28,57 @@ static void print_indent(int n) {
     printf(" ");
 }
 
-static void print_colored(int level, const char *msg, const char* tag, const char *color) {
+static void vprint_colored(int level, const char* tag, const char* color, const char* fmt, va_list ap) {
   print_indent(level);
-  if (tag[0] != '\0')
-    printf("%s%s   %s%s\n", color, tag, msg, ANSI_RESET);
-  else 
-    printf("%s%s%s\n", color, msg, ANSI_RESET);
 
+  // Print tag if present
+  if (tag && tag[0] != '\0') {
+    printf("%s%s   ", color, tag);
+  } else {
+    printf("%s", color);
+  }
+
+  // Print the formatted message
+  vprintf(1, fmt, ap);
+  printf("%s\n", ANSI_RESET);
 }
 
 void set_tag(const char *tag) {
   global_tag = tag;
 }
 
-void fail(int level, const char *msg) {
-  print_colored(level, msg, "FAIL", ANSI_RED);
+void fail(int level, const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  vprint_colored(level, "FAIL", ANSI_RED, fmt, ap);
+  va_end(ap);
   exit(1);
 }
 
-void failnoex(int level, const char *msg) {
-  print_colored(level, msg, "FAIL", ANSI_RED);
+void failnoex(int level, const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  vprint_colored(level, "FAIL", ANSI_RED, fmt, ap);
+  va_end(ap);
 }
 
-void pass(int level, const char *msg) {
-  print_colored(level, msg, "PASS", ANSI_GREEN);
+void pass(int level, const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  vprint_colored(level, "PASS", ANSI_GREEN, fmt, ap);
+  va_end(ap);
 }
 
-void warn(int level, const char *msg) {
-  print_colored(level, msg, "WARNING", ANSI_YELLOW);
+void warn(int level, const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  vprint_colored(level, "WARNING", ANSI_YELLOW, fmt, ap);
+  va_end(ap);
 }
 
-void info(int level, const char *msg) {
-  print_colored(level, msg, "", ANSI_PURPLE);
+void info(int level, const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  vprint_colored(level, "", ANSI_PURPLE, fmt, ap);
+  va_end(ap);
 }

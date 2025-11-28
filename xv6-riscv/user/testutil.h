@@ -32,37 +32,42 @@ void set_tag(const char *tag);
  * @brief Print a failure message (in red) and exit with code 1.
  * @param level Indentation level (number of spaces before the tag).
  * @param msg Null-terminated description string.
+ * @param ... Additional format arguments (printf-style).
  */
-void fail(int level, const char *msg);
+void fail(int level, const char *msg, ...);
 
 /**
  * @brief Print a failure message (in red) without exiting.
  * 
  * @param level Indentation level (number of spaces before the tag).
  * @param msg Null-terminated description string.
+ * @param ... Additional format arguments (printf-style).
  */
-void failnoex(int level, const char *msg);
+void failnoex(int level, const char *msg, ...);
 
 
 /**
  * @brief Print a success message (in green).
  * @param level Indentation level (number of spaces before the tag).
  * @param msg Null-terminated description string.
+ * @param ... Additional format arguments (printf-style).
  */
-void pass(int level, const char *msg);
+void pass(int level, const char *msg, ...);
 
 /**
  * @brief Print a warning message (in yellow).
  * @param level Indentation level (number of spaces before the tag).
  * @param msg Null-terminated description string.
+ * @param ... Additional format arguments (printf-style).
  */
-void warn(int level, const char *msg);
+void warn(int level, const char *msg, ...);
 
 /**
  * @brief Print an informational message (in purple).
  * @param level Indentation level (number of spaces before the tag).
  * @param msg Null-terminated description string.
+ * @param ... Additional format arguments (printf-style).
  */
-void info(int level, const char *msg);
+void info(int level, const char *msg, ...);
 
 #endif // TESTUTIL_H
