@@ -28,6 +28,10 @@ int link(const char*, const char*);
 int mkdir(const char*);
 int chdir(const char*);
 int dup(int);
+// User stubs for reading cycle, time, and instret CSRs
+uint64 rdcycle(void);
+uint64 rdtime(void);
+uint64 rdinstret(void);
 int getpid(void);
 char* sys_sbrk(int,int);
 int pause(int);

@@ -104,6 +104,10 @@ extern uint64 sys_unlink(void);
 extern uint64 sys_link(void);
 extern uint64 sys_mkdir(void);
 extern uint64 sys_close(void);
+// Syscalls for reading cycles, time, and instret
+extern uint64 sys_rdcycle(void);
+extern uint64 sys_rdtime(void);
+extern uint64 sys_rdinstret(void);
 
 #ifdef LAB_NET
 extern uint64 sys_bind(void);
@@ -145,6 +149,9 @@ static uint64 (*syscalls[])(void) = {
 [SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
+[SYS_rdcycle]   sys_rdcycle,
+[SYS_rdtime]    sys_rdtime,
+[SYS_rdinstret] sys_rdinstret,
 #ifdef LAB_NET
 [SYS_bind] sys_bind,
 [SYS_unbind] sys_unbind,

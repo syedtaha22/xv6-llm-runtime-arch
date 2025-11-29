@@ -8,6 +8,22 @@
 #include "vm.h"
 #include "shm.h"
 
+/**
+ * Wrapper functions for reading cycle, time, and instret CSRs
+ */
+
+uint64 sys_rdcycle(void) {
+  return r_cycle();
+}
+
+uint64 sys_rdtime(void) {
+  return r_time();
+}
+
+uint64 sys_rdinstret(void) {
+  return r_instret();
+}
+
 uint64
 sys_exit(void)
 {
