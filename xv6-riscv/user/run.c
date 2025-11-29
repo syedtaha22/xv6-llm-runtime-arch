@@ -58,6 +58,15 @@
 #define isprint xisprint
 #define isspace xisspace
 
+// Math function macros
+#define sqrtf xsqrtf
+#define expf xexpf
+#define powf xpowf
+#define cosf xcosf
+#define sinf xsinf
+#define abs xfabsf
+#define floorf xfloorf
+
 #define stdout 1 // fd for standard output
 #define stderr 2 // fd for standard error
 
@@ -71,7 +80,17 @@
 
 typedef uint32 size_t;
 #define NULL ((void*)0)
-#define eprintf(fmt, ...) printf(stderr, fmt, ##__VA_ARGS__) // xv6 replacement for fprintf(stderr, ...)
+#define eprintf(fmt, ...) printf(fmt, ##__VA_ARGS__) // xv6 replacement for fprintf(stderr, ...)
+
+void* GLOBAL_WEIGHTS_PTR = NULL; // global pointer to the model weights in shared memory
+void* GLOBAL_TOKENIZER_PTR = NULL; // global pointer to the tokenizer data in shared memory
+
+void release_and_exit(int code) {
+    // clean up any global state here if needed
+    shmdt(GLOBAL_WEIGHTS_PTR);
+    shmdt(GLOBAL_TOKENIZER_PTR);
+    exit(code);
+}
 
 /**
  * @brief Fetch or attach to cached model data in shared memory.
@@ -207,7 +226,7 @@ void malloc_run_state(RunState* s, Config* p) {
     if (!s->x || !s->xb || !s->xb2 || !s->hb || !s->hb2 || !s->q
      || !s->key_cache || !s->value_cache || !s->att || !s->logits) {
         eprintf("malloc failed!\n");
-        exit(EXIT_FAILURE);
+        release_and_exit(EXIT_FAILURE);
     }
 }
 
@@ -280,6 +299,7 @@ void memory_map_weights(TransformerWeights *w, Config* p, float* ptr, int shared
  */
 
 void build_transformer(Transformer *t, void *weights_ptr) {
+    printf("Building transformer model from shared memory...\n");
     // First bytes of weights contain Config
     memcpy(&t->config, weights_ptr, sizeof(Config));
     int shared_weights = t->config.vocab_size > 0 ? 1 : 0;
@@ -338,7 +358,7 @@ void matmul(float* xout, float* x, float* w, int n, int d) {
     // W (d,n) @ x (n,) -> xout (d,)
     // by far the most amount of time is spent inside this little function
     int i;
-    #pragma omp parallel for private(i)
+    // #pragma omp parallel for private(i)
     for (i = 0; i < d; i++) {
         float val = 0.0f;
         for (int j = 0; j < n; j++) {
@@ -400,7 +420,7 @@ float* forward(Transformer* transformer, int token, int pos) {
 
         // multihead attention. iterate over all heads
         int h;
-        #pragma omp parallel for private(h)
+        // #pragma omp parallel for private(h)
         for (h = 0; h < p->n_heads; h++) {
             // get the query vector for this head
             float* q = s->q + h * head_size;
@@ -531,6 +551,7 @@ int compare_tokens(const void *a, const void *b) {
  */
 
 void build_tokenizer(Tokenizer* t, void* tokenizer_data, int vocab_size) {
+    printf("Building tokenizer from shared memory...\n");
     // i should have written the vocab_size into the tokenizer file... sigh
     t->vocab_size = vocab_size;
     // malloc space to hold the scores and the strings
@@ -598,25 +619,30 @@ void safe_printf(char *piece) {
 }
 
 int str_lookup(char *str, TokenIndex *sorted_vocab, int vocab_size) {
-    // efficiently find the perfect match for str in vocab, return its index or -1 if not found
-    TokenIndex tok = { .str = str }; // acts as the key to search for
-    TokenIndex *res = bsearch(&tok, sorted_vocab, vocab_size, sizeof(TokenIndex), compare_tokens);
-    return res != NULL ? res->id : -1;
+    // Linear search instead of binary search to avoid qsort overhead in xv6
+    // This is slower but avoids stack overflow issues with qsort on large vocab
+    for (int i = 0; i < vocab_size; i++) {
+        if (sorted_vocab[i].str != NULL && strcmp(sorted_vocab[i].str, str) == 0) {
+            return sorted_vocab[i].id;
+        }
+    }
+    return -1;
 }
 
 void encode(Tokenizer* t, char *text, int8_t bos, int8_t eos, int *tokens, int *n_tokens) {
     // encode the string text (input) into an upper-bound preallocated tokens[] array
     // bos != 0 means prepend the BOS token (=1), eos != 0 means append the EOS token (=2)
-    if (text == NULL) { eprintf("cannot encode NULL text\n"); exit(EXIT_FAILURE); }
+    if (text == NULL) { eprintf("cannot encode NULL text\n"); release_and_exit(EXIT_FAILURE); }
 
     if (t->sorted_vocab == NULL) {
-        // lazily malloc and sort the vocabulary
+        // printf("[encode] Allocating sorted_vocab...\n");
+        // lazily malloc and populate the vocabulary (without sorting - using linear search instead)
         t->sorted_vocab = malloc(t->vocab_size * sizeof(TokenIndex));
         for (int i = 0; i < t->vocab_size; i++) {
             t->sorted_vocab[i].str = t->vocab[i];
             t->sorted_vocab[i].id = i;
         }
-        qsort(t->sorted_vocab, t->vocab_size, sizeof(TokenIndex), compare_tokens);
+        // printf("[encode] Vocab populated, skipping qsort (using linear search instead)\n");
     }
 
     // create a temporary buffer that will store merge candidates of always two consecutive tokens
@@ -820,6 +846,7 @@ int sample_topp(float* probabilities, int n, float topp, ProbIndex* probindex, f
 }
 
 void build_sampler(Sampler* sampler, int vocab_size, float temperature, float topp, unsigned long long rng_seed) {
+    printf("Building sampler...\n");
     sampler->vocab_size = vocab_size;
     sampler->temperature = temperature;
     sampler->topp = topp;
@@ -871,27 +898,26 @@ int sample(Sampler* sampler, float* logits) {
 // ----------------------------------------------------------------------------
 // utilities: time
 
-long time_in_ms() {
-    // return time in milliseconds, for benchmarking the model speed
-    struct timespec time;
-    clock_gettime(CLOCK_REALTIME, &time);
-    return time.tv_sec * 1000 + time.tv_nsec / 1000000;
+long time_in_ms(void) {
+    return (long)(rdtime() / 100000); // 100 MHz = 100,000,000 cycles/sec
 }
 
 // ----------------------------------------------------------------------------
 // generation loop
 
 void generate(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, char *prompt, int steps) {
+    printf("Generating up to %d tokens...\n", steps);
     char *empty_prompt = "";
     if (prompt == NULL) { prompt = empty_prompt; }
 
     // encode the (string) prompt into tokens sequence
     int num_prompt_tokens = 0;
     int* prompt_tokens = (int*)malloc((strlen(prompt)+3) * sizeof(int)); // +3 for '\0', ?BOS, ?EOS
+    printf("Encoding prompt: \"%s\"\n", prompt);
     encode(tokenizer, prompt, 1, 0, prompt_tokens, &num_prompt_tokens);
     if (num_prompt_tokens < 1) {
         eprintf("something is wrong, expected at least 1 prompt token\n");
-        exit(EXIT_FAILURE);
+        release_and_exit(EXIT_FAILURE);
     }
 
     // start the main loop
@@ -900,7 +926,6 @@ void generate(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, 
     int token = prompt_tokens[0]; // kick off with the first token in the prompt
     int pos = 0;     // position in the sequence
     while (pos < steps) {
-
         // forward the transformer to get logits for the next token
         float* logits = forward(transformer, token, pos);
 
@@ -936,14 +961,20 @@ void generate(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, 
     free(prompt_tokens);
 }
 
-void read_stdin(const char* guide, char* buffer, size_t bufsize) {
+void read_stdin(const char *guide, char *buffer, size_t bufsize)
+{
     // read a line from stdin, up to but not including \n
     printf("%s", guide);
-    if (fgets(buffer, bufsize, stdin) != NULL) {
-        size_t len = strlen(buffer);
-        if (len > 0 && buffer[len - 1] == '\n') {
-            buffer[len - 1] = '\0'; // strip newline
-        }
+    // Use xv6's gets function
+    if (gets(buffer, bufsize) == 0) {
+        // Handle EOF or error
+        buffer[0] = '\0';
+    }
+    
+    // Remove trailing newline if present (gets might include it)
+    size_t len = strlen(buffer);
+    if (len > 0 && buffer[len - 1] == '\n') {
+        buffer[len - 1] = '\0';
     }
 }
 
@@ -967,9 +998,9 @@ void chat(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler,
 
     // start the main loop
     int8_t user_turn = 1; // user starts
-    int next;        // will store the next token in the sequence
+    int next = 0;        // will store the next token in the sequence
     int token;       // stores the current token to feed into the transformer
-    int prev_token;
+    // int prev_token;
     int pos = 0;     // position in the sequence
     while (pos < steps) {
 
@@ -1042,7 +1073,7 @@ void chat(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler,
 #ifndef TESTING
 
 void error_usage() {
-    eprintf("Usage:   run <checkpoint> [options]\n");
+    eprintf("Usage:   run [options]\n");
     eprintf("Example: run model.bin -n 256 -i \"Once upon a time\"\n");
     eprintf("Options:\n");
     eprintf("  -t <float>  temperature in [0,inf], default 1.0\n");
@@ -1050,17 +1081,18 @@ void error_usage() {
     eprintf("  -s <int>    random seed, default time(NULL)\n");
     eprintf("  -n <int>    number of steps to run for, default 256. 0 = max_seq_len\n");
     eprintf("  -i <string> input prompt\n");
-    eprintf("  -z <string> optional path to custom tokenizer\n");
     eprintf("  -m <string> mode: generate|chat, default: generate\n");
     eprintf("  -y <string> (optional) system prompt in chat mode\n");
     exit(EXIT_FAILURE);
 }
 
 int main(int argc, char *argv[]) {
+    printf("run: starting...\n");
+    printf("run: argc=%d\n", argc);
 
     // default parameters
-    char *checkpoint_path = NULL;  // e.g. out/model.bin
-    char *tokenizer_path = "tokenizer.bin";
+    // char *checkpoint_path = NULL;  // e.g. out/model.bin
+    // char *tokenizer_path = "tokenizer.bin";
     float temperature = 1.0f;   // 0.0 = greedy deterministic. 1.0 = original. don't set higher
     float topp = 0.9f;          // top-p in nucleus sampling. 1.0 = off. 0.9 works well, but slower
     int steps = 256;            // number of steps to run for
@@ -1070,8 +1102,8 @@ int main(int argc, char *argv[]) {
     char *system_prompt = NULL; // the (optional) system prompt to use in chat mode
 
     // poor man's C argparse so we can override the defaults above from the command line
-    if (argc >= 2) { checkpoint_path = argv[1]; } else { error_usage(); }
-    for (int i = 2; i < argc; i+=2) {
+    // if (argc >= 2) { checkpoint_path = argv[1]; } else { error_usage(); }
+    for (int i = 1; i < argc; i+=2) {
         // do some basic validation
         if (i + 1 >= argc) { error_usage(); } // must have arg after flag
         if (argv[i][0] != '-') { error_usage(); } // must start with dash
@@ -1082,31 +1114,38 @@ int main(int argc, char *argv[]) {
         else if (argv[i][1] == 's') { rng_seed = atoi(argv[i + 1]); }
         else if (argv[i][1] == 'n') { steps = atoi(argv[i + 1]); }
         else if (argv[i][1] == 'i') { prompt = argv[i + 1]; }
-        else if (argv[i][1] == 'z') { tokenizer_path = argv[i + 1]; }
         else if (argv[i][1] == 'm') { mode = argv[i + 1]; }
         else if (argv[i][1] == 'y') { system_prompt = argv[i + 1]; }
         else { error_usage(); }
     }
 
+    printf("run: parsed arguments\n");
+
     // parameter validation/overrides
-    if (rng_seed <= 0) rng_seed = (unsigned int)time(NULL);
+    if (rng_seed <= 0) rng_seed = (unsigned int)rdtime();
     if (temperature < 0.0) temperature = 0.0;
     if (topp < 0.0 || 1.0 < topp) topp = 0.9;
     if (steps < 0) steps = 0;
+
+    printf("run: fetching weights from shared memory...\n");
 
     // build the Transformer
     Transformer transformer;
     // build the Tokenizer 
     Tokenizer tokenizer;
 
-    void *weights_ptr = fetch_if_not_cached("llm_weights", WEIGHTS_SIZE, fetch_model_weights);
-    if (!weights_ptr) { eprintf("Could not load weights\n"); exit(1); }
+    GLOBAL_WEIGHTS_PTR = fetch_if_not_cached("llm_weights", WEIGHTS_SIZE, fetch_model_weights);
+    if (!GLOBAL_WEIGHTS_PTR) { eprintf("Could not load weights\n"); exit(1); }
 
-    void *tokenizer_ptr = fetch_if_not_cached("llm_tokenizer", TOKENIZER_SIZE, fetch_tokenizer);
-    if (!tokenizer_ptr) { eprintf("Could not load tokenizer\n"); exit(1); }
+    GLOBAL_TOKENIZER_PTR = fetch_if_not_cached("llm_tokenizer", TOKENIZER_SIZE, fetch_tokenizer);
+    if (!GLOBAL_TOKENIZER_PTR) { 
+        eprintf("Could not load tokenizer\n"); 
+        shmdt(GLOBAL_WEIGHTS_PTR);
+        exit(1); 
+    }
 
-    build_transformer(&transformer, weights_ptr);
-    build_tokenizer(&tokenizer, tokenizer_ptr, transformer.config.vocab_size);
+    build_transformer(&transformer, GLOBAL_WEIGHTS_PTR);
+    build_tokenizer(&tokenizer, GLOBAL_TOKENIZER_PTR, transformer.config.vocab_size);
 
     if (steps == 0 || steps > transformer.config.seq_len) steps = transformer.config.seq_len; // override to ~max length
 
@@ -1131,4 +1170,3 @@ int main(int argc, char *argv[]) {
     return 0;
 }
 #endif
->>>>>>> Stashed changes

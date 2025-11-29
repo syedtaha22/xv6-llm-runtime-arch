@@ -169,6 +169,11 @@ $U/_inference: $U/inference.o $(ULIB) $U/ftpclient.o $U/sha256.o
 	$(OBJDUMP) -S $@ > $U/inference.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/inference.sym
 
+$U/_run: $U/run.o $(ULIB) $U/ftpclient.o $U/sha256.o
+	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/run.o $(ULIB) $U/ftpclient.o $U/sha256.o
+	$(OBJDUMP) -S $@ > $U/run.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/run.sym
+
 _%: %.o $(ULIB) $U/user.ld
 	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $< $(ULIB)
 	$(OBJDUMP) -S $@ > $*.asm
