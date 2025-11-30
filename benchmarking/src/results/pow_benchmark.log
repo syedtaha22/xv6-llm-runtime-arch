@@ -1,0 +1,14 @@
+Function Benchmark Results ( 1000 evaluations per function )
+
+Function: std::pow
+  Time: 0.0000836 seconds
+  Avg Relative Error: 0.0000000
+
+Function: pow_fast_bit
+  Time: 0.0000031 seconds
+  Avg Relative Error: 0.0664304
+
+Function: pow_classic
+  Time: 0.0000408 seconds
+  Avg Relative Error: 0.0000154
+

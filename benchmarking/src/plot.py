@@ -64,14 +64,21 @@ class BenchmarkPlotter:
             print(f"Error reading CSV file: {e}")
             return False
 
-        if 'x' not in temp_df.columns:
-            print("Error: CSV file must contain an 'x' column.")
+        # Check for input columns
+        if 'x' in temp_df.columns:
+            self.x_values = temp_df['x']
+            input_cols = ['x']
+        elif 'x1' in temp_df.columns and 'x2' in temp_df.columns:
+            # For 2D inputs, sort by x1 then x2
+            temp_df = temp_df.sort_values(by=['x1', 'x2']).reset_index(drop=True)
+            self.x_values = None  # Not used for 2D
+            input_cols = ['x1', 'x2']
+        else:
+            print("Error: CSV file must contain 'x' column or 'x1' and 'x2' columns.")
             return False
 
-        self.df = temp_df.sort_values(by='x').reset_index(drop=True)
-        self.x_values = self.df['x']
-        
-        all_cols = [col for col in self.df.columns if col != 'x']
+        self.df = temp_df
+        all_cols = [col for col in self.df.columns if col not in input_cols]
         if len(all_cols) < 1:
              print("Error: CSV must contain at least one function output column.")
              return False

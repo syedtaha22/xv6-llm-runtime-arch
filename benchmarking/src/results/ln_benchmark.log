@@ -1,0 +1,26 @@
+Function Benchmark Results ( 1000 evaluations per function )
+
+Function: std::log
+  Time: 0.0000162 seconds
+  Avg Relative Error: 0.0000000
+
+Function: ln_fast_bit_tricks
+  Time: 0.0000023 seconds
+  Avg Relative Error: 0.0476210
+
+Function: ln_poly
+  Time: 0.0000040 seconds
+  Avg Relative Error: 0.0608709
+
+Function: taylor_series_ln_100
+  Time: 0.0003017 seconds
+  Avg Relative Error: nan
+
+Function: taylor_series_ln_10
+  Time: 0.0000064 seconds
+  Avg Relative Error: 10344516.0000000
+
+Function: ln_horners_method
+  Time: 0.0000132 seconds
+  Avg Relative Error: 0.0000436
+

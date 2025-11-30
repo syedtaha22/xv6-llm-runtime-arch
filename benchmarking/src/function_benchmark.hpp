@@ -29,6 +29,27 @@ namespace Benchmark {
      * This is placed inside the namespace as it's directly related to the benchmark utilities.
      */
     using func = std::function<float(float)>;
+    using func_pair = std::function<float(float, float)>;
+
+    /**
+     * @brief Traits to determine input type based on function type.
+     */
+    template<typename F>
+    struct function_traits;
+
+    template<>
+    struct function_traits<func> {
+        using input_type = float;
+        using input_vector = std::vector<float>;
+        static constexpr bool is_pair = false;
+    };
+
+    template<>
+    struct function_traits<func_pair> {
+        using input_type = std::pair<float, float>;
+        using input_vector = std::vector<std::pair<float, float>>;
+        static constexpr bool is_pair = true;
+    };
 
     /**
      * @brief Enum to specify the type of error metric to calculate.
@@ -56,12 +77,14 @@ namespace Benchmark {
      */
     template<typename FunctionType>
     class function_test_bench {
+        using InputVector = typename function_traits<FunctionType>::input_vector;
+
         // Removed: FunctionType reference_function;
         // Removed: std::string reference_function_name;
         // The reference function is now the first entry in test_results.
 
         std::vector<std::pair<std::string, FunctionType>> functions_to_benchmark; ///< List of functions to add for benchmarking (excluding reference)
-        std::vector<float> input_values;                                  ///< Input values for function evaluation
+        InputVector input_values;                                  ///< Input values for function evaluation
         std::vector<float> reference_results;                             ///< Pre-calculated results from the reference function (for error calculations)
         // Removed: std::map<std::string, std::vector<float>> benchmarked_outputs;
         // All outputs are now directly stored within the 'result' struct in 'test_results'.
@@ -159,7 +182,15 @@ namespace Benchmark {
             std::vector<float> current_outputs(input_values.size());
 
             auto start = std::chrono::high_resolution_clock::now();
-            for (size_t i = 0; i < input_values.size(); ++i) current_outputs[i] = func_to_benchmark(input_values[i]);
+            if constexpr (function_traits<FunctionType>::is_pair) {
+                for (size_t i = 0; i < input_values.size(); ++i) {
+                    current_outputs[i] = func_to_benchmark(input_values[i].first, input_values[i].second);
+                }
+            } else {
+                for (size_t i = 0; i < input_values.size(); ++i) {
+                    current_outputs[i] = func_to_benchmark(input_values[i]);
+                }
+            }
             auto end = std::chrono::high_resolution_clock::now();
 
             std::chrono::duration<float> elapsed = end - start;
@@ -180,7 +211,7 @@ namespace Benchmark {
          * @param inputs A vector of input values to evaluate functions with.
          * @param metric The error metric to use for reporting (default: RELATIVE_ERROR).
          */
-        function_test_bench(std::string ref_func_name, FunctionType ref_func, const std::vector<float>& inputs,
+        function_test_bench(std::string ref_func_name, FunctionType ref_func, const InputVector& inputs,
             ErrorMetric metric = ErrorMetric::RELATIVE_ERROR)
             : input_values(inputs),
             chosen_error_metric(metric)
@@ -300,7 +331,11 @@ namespace Benchmark {
             // csv_file << std::fixed << std::setprecision(9); // More precision for CSV raw data
 
             // Write CSV header
-            csv_file << "x";
+            if constexpr (function_traits<FunctionType>::is_pair) {
+                csv_file << "x1,x2";
+            } else {
+                csv_file << "x";
+            }
             // Add headers for all benchmarked functions, in the order they appear in test_results
             for (const auto& r : test_results) {
                 csv_file << "," << r.name << "_output";
@@ -309,7 +344,11 @@ namespace Benchmark {
 
             // Write data rows
             for (size_t i = 0; i < input_values.size(); ++i) {
-                csv_file << input_values[i]; // x value
+                if constexpr (function_traits<FunctionType>::is_pair) {
+                    csv_file << input_values[i].first << "," << input_values[i].second;
+                } else {
+                    csv_file << input_values[i];
+                }
                 // Write outputs for each function in the order they appear in test_results
                 for (const auto& r : test_results) csv_file << "," << r.outputs[i];
                 csv_file << "\n";
@@ -351,6 +390,52 @@ namespace Benchmark {
                 std::uniform_int_distribution<T> distrib(min_val, max_val);
                 std::generate_n(std::back_inserter(inputs), num_points, [&]() {
                     return distrib(gen);
+                    });
+            }
+            else {
+                // This static_assert will cause a compile-time error if an unsupported type is used.
+                static_assert(std::is_arithmetic_v<T>, "T must be an arithmetic type (e.g., int, float, double).");
+            }
+
+            return inputs;
+        }
+
+        /**
+         * @brief Generates a vector of N random data point pairs of a specified numeric type within given ranges.
+         * The type T determines the type of the elements in the generated vector and the type of the range values.
+         * 
+         * @tparam T The numeric type of the elements in the generated vector (e.g., int, float, double).
+         * @param min_val1 The minimum value of the first element in the pair (inclusive).
+         * @param max_val1 The maximum value of the first element in the pair (inclusive).
+         * @param min_val2 The minimum value of the second element in the pair (inclusive).
+         * @param max_val2 The maximum value of the second element in the pair (inclusive).
+         * @param num_points The number of data point pairs to generate. Must be at least 0.
+         * @return A std::vector<std::pair<T, T>> containing the randomly generated data point pairs.
+         */
+        template<typename T>
+        static std::vector<std::pair<T, T>> generate_inputs_pair(T min_val1, T max_val1, T min_val2, T max_val2, size_t num_points) {
+            std::vector<std::pair<T, T>> inputs;
+            if (num_points == 0) return inputs; // Return empty vector if no points requested
+
+            inputs.reserve(num_points);
+
+            // Seed the random number generator
+            std::random_device rd;
+            std::mt19937 gen(rd());
+
+            // Use if constexpr to select the appropriate distribution based on T
+            if constexpr (std::is_floating_point_v<T>) {
+                std::uniform_real_distribution<T> distrib1(min_val1, max_val1);
+                std::uniform_real_distribution<T> distrib2(min_val2, max_val2);
+                std::generate_n(std::back_inserter(inputs), num_points, [&]() {
+                    return std::make_pair(distrib1(gen), distrib2(gen));
+                    });
+            }
+            else if constexpr (std::is_integral_v<T>) {
+                std::uniform_int_distribution<T> distrib1(min_val1, max_val1);
+                std::uniform_int_distribution<T> distrib2(min_val2, max_val2);
+                std::generate_n(std::back_inserter(inputs), num_points, [&]() {
+                    return std::make_pair(distrib1(gen), distrib2(gen));
                     });
             }
             else {
