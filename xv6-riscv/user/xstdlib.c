@@ -41,49 +41,80 @@ void* xbsearch(const void* key, const void* base, uint nmemb, uint size, int (*c
 
 static void swap(char* a, char* b, uint size) {
     for (int i = 0; i < size; i++) {
-        char tmp = a[i]; a[i] = b[i]; b[i] = tmp;
+        char tmp = a[i]; 
+        a[i] = b[i]; 
+        b[i] = tmp;
     }
 }
 
-static char* median_of_three(char* base, int low, int high, uint size, int (*compar)(const void*, const void*)) {
-    int mid = low + (high - low) / 2;
-    char* a = base + low * size;
-    char* b = base + mid * size;
-    char* c = base + high * size;
-
-    if (compar(a, b) > 0) { char* tmp = a; a = b; b = tmp; }
-    if (compar(a, c) > 0) { char* tmp = a; a = c; c = tmp; }
-    if (compar(b, c) > 0) { char* tmp = b; b = c; c = tmp; }
-
-    return b;
-}
-
-static int partition(char* base, int low, int high, uint size, int (*compar)(const void*, const void*)) {
-    char* pivot = median_of_three(base, low, high, size, compar);
-    char* low_elem = base + low * size;
-    if (pivot != low_elem) swap(pivot, low_elem, size);
-    pivot = low_elem;
-
-    int i = low - 1, j = high + 1;
-    while (1) {
-        do { i++; } while (i <= high && compar(base + (i * size), pivot) < 0);
-        do { j--; } while (j >= low && compar(base + (j * size), pivot) > 0);
-        if (i >= j) return j;
-        swap(base + (i * size), base + (j * size), size);
-    }
-}
-
-static void qsort_helper(char* base, int low, int high, uint size, int (*compar)(const void*, const void*)) {
-    if (low < high) {
-        int p = partition(base, low, high, size, compar);
-        qsort_helper(base, low, p, size, compar);
-        qsort_helper(base, p + 1, high, size, compar);
-    }
-}
+#define MAX_STACK 128  // log2(vocab_size) * 2 should be enough
 
 void xqsort(void* base, uint nmemb, uint size, int (*compar)(const void*, const void*)) {
     if (nmemb <= 1) return;
-    qsort_helper((char*)base, 0, nmemb - 1, size, compar);
+    
+    // Allocate stack for iterative quicksort
+    int* stack = malloc(MAX_STACK * sizeof(int));
+    if (!stack) return;
+    
+    char* arr = (char*)base;
+    int top = -1;
+    
+    // Push initial range
+    stack[++top] = 0;
+    stack[++top] = nmemb - 1;
+    
+    while (top >= 0) {
+        // Pop range
+        int high = stack[top--];
+        int low = stack[top--];
+        
+        if (low >= high) continue;
+        
+        // Partition
+        char* pivot_value = malloc(size);
+        if (!pivot_value) {
+            free(stack);
+            return;
+        }
+        memcpy(pivot_value, arr + high * size, size);
+        
+        int i = low - 1;
+        for (int j = low; j < high; j++) {
+            if (compar(arr + j * size, pivot_value) <= 0) {
+                i++;
+                swap(arr + i * size, arr + j * size, size);
+            }
+        }
+        swap(arr + (i + 1) * size, arr + high * size, size);
+        free(pivot_value);
+        
+        int p = i + 1;
+        
+        // Push larger partition first (to minimize stack usage)
+        if (p - low > high - p) {
+            // Left is larger
+            if (low < p - 1) {
+                stack[++top] = low;
+                stack[++top] = p - 1;
+            }
+            if (p + 1 < high) {
+                stack[++top] = p + 1;
+                stack[++top] = high;
+            }
+        } else {
+            // Right is larger
+            if (p + 1 < high) {
+                stack[++top] = p + 1;
+                stack[++top] = high;
+            }
+            if (low < p - 1) {
+                stack[++top] = low;
+                stack[++top] = p - 1;
+            }
+        }
+    }
+    
+    free(stack);
 }
 
 int xatoi(const char* str) {
