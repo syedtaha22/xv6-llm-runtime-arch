@@ -85,11 +85,138 @@ typedef uint32 size_t;
 void* GLOBAL_WEIGHTS_PTR = NULL; // global pointer to the model weights in shared memory
 void* GLOBAL_TOKENIZER_PTR = NULL; // global pointer to the tokenizer data in shared memory
 
+/**
+ * @brief Performance metrics structure for benchmarking.
+ */
+typedef struct {
+    // Function call counts
+    long long total_function_calls;
+    int forward_calls;
+    int matmul_calls;
+    int rmsnorm_calls;
+    int softmax_calls;
+    int sample_calls;
+    int encode_calls;
+    int decode_calls;
+    
+    // Math function call counts
+    int sqrt_calls;
+    int exp_calls;
+    int pow_calls;
+    int cos_calls;
+    int sin_calls;
+    int fabs_calls;
+    int floor_calls;
+    
+    // Memory and time metrics
+    uint64 peak_ram_usage;
+    uint64 initial_ram_usage;
+    uint64 final_ram_usage;
+    long long start_time_ms;
+    long long end_time_ms;
+    long long total_inference_time_ms;
+    
+    // Model statistics
+    int total_tokens_generated;
+    int prompt_tokens;
+    float tokens_per_second;
+} PerformanceMetrics;
+
+/** @brief Global performance metrics instance. */
+PerformanceMetrics perf_metrics = {0};
+
+// ----------------------------------------------------------------------------
+// utilities: time
+
+long time_in_ms(void) {
+    return (long)(rdtime() / 100000); // 100 MHz = 100,000,000 cycles/sec
+}
+
+
+/**
+ * @brief Update peak RAM usage if current usage is higher.
+ */
+void update_peak_ram(void) {
+    uint64 current = getramused();
+    if (current > perf_metrics.peak_ram_usage) {
+        perf_metrics.peak_ram_usage = current;
+    }
+}
+
+/**
+ * @brief Math function wrappers with call counting.
+ */
+float sqrtf_wrapper(float x) { perf_metrics.sqrt_calls++; return xsqrtf(x); }
+float expf_wrapper(float x) { perf_metrics.exp_calls++; return xexpf(x); }
+float powf_wrapper(float x, float y) { perf_metrics.pow_calls++; return xpowf(x, y); }
+float cosf_wrapper(float x) { perf_metrics.cos_calls++; return xcosf(x); }
+float sinf_wrapper(float x) { perf_metrics.sin_calls++; return xsinf(x); }
+float fabsf_wrapper(float x) { perf_metrics.fabs_calls++; return xfabsf(x); }
+float floorf_wrapper(float x) { perf_metrics.floor_calls++; return xfloorf(x); }
+
+// Redefine math macros to use wrappers
+#undef sqrtf
+#define sqrtf sqrtf_wrapper
+#undef expf
+#define expf expf_wrapper
+#undef powf
+#define powf powf_wrapper
+#undef cosf
+#define cosf cosf_wrapper
+#undef sinf
+#define sinf sinf_wrapper
+#undef abs
+#define abs fabsf_wrapper
+#undef floorf
+#define floorf floorf_wrapper
+
+/**
+ * @brief Print performance metrics.
+ */
+void print_performance_metrics() {
+    printf("\n=== Performance Metrics ===\n");
+    printf("Total function calls: \n");
+    printf(" Forward calls: %d\n", perf_metrics.forward_calls);
+    printf(" Matmul calls: %d\n", perf_metrics.matmul_calls);
+    printf(" RMSNorm calls: %d\n", perf_metrics.rmsnorm_calls);
+    printf(" Softmax calls: %d\n", perf_metrics.softmax_calls);
+    printf(" Sample calls: %d\n", perf_metrics.sample_calls);
+    printf(" Encode calls: %d\n", perf_metrics.encode_calls);
+    printf(" Decode calls: %d\n", perf_metrics.decode_calls);
+    printf(" Math function calls:\n");
+    printf("  sqrt: %d\n", perf_metrics.sqrt_calls);
+    printf("  exp: %d\n", perf_metrics.exp_calls);
+    printf("  pow: %d\n", perf_metrics.pow_calls);
+    printf("  cos: %d\n", perf_metrics.cos_calls);
+    printf("  sin: %d\n", perf_metrics.sin_calls);
+    printf("  fabs: %d\n", perf_metrics.fabs_calls);
+    printf("  floor: %d\n", perf_metrics.floor_calls);
+    printf("Memory usage:\n");
+    printf("  Initial RAM: %lu bytes (%lu MB)\n", perf_metrics.initial_ram_usage, perf_metrics.initial_ram_usage / (1024*1024));
+    printf("  Peak RAM: %lu bytes (%f MB)\n", perf_metrics.peak_ram_usage, perf_metrics.peak_ram_usage / (1024.0f*1024.0f));
+    printf("  Final RAM: %lu bytes (%lu MB)\n", perf_metrics.final_ram_usage, perf_metrics.final_ram_usage / (1024*1024));
+    printf("Timing:\n");
+    printf("  Total time: %lld ms\n", perf_metrics.end_time_ms - perf_metrics.start_time_ms);
+    printf("  Inference time: %lld ms\n", perf_metrics.total_inference_time_ms);
+    printf("Tokens:\n");
+    printf("  Generated: %d\n", perf_metrics.total_tokens_generated);
+    printf("  Tokens/sec: %f\n", perf_metrics.tokens_per_second);
+    printf("===========================\n");
+}
+
 void release_and_exit(int code) {
     // clean up any global state here if needed
     shmdt(GLOBAL_WEIGHTS_PTR);
     shmdt(GLOBAL_TOKENIZER_PTR);
     exit(code);
+}
+
+/**
+ * @brief Print current RAM usage.
+ */
+void print_ram_usage(const char *msg) {
+  uint64 used = getramused();
+  printf("%s: %lu bytes (%lu KB, %lu MB)\n", msg, used, used / 1024, used / (1024 * 1024));
 }
 
 /**
@@ -299,7 +426,7 @@ void memory_map_weights(TransformerWeights *w, Config* p, float* ptr, int shared
  */
 
 void build_transformer(Transformer *t, void *weights_ptr) {
-    printf("Building transformer model from shared memory...\n");
+    // printf("Building transformer model from shared memory...\n");
     // First bytes of weights contain Config
     memcpy(&t->config, weights_ptr, sizeof(Config));
     int shared_weights = t->config.vocab_size > 0 ? 1 : 0;
@@ -320,6 +447,7 @@ void free_transformer(Transformer *t) {
 // neural net blocks; the dynamics of the Transformer
 
 void rmsnorm(float* o, float* x, float* weight, int size) {
+    perf_metrics.rmsnorm_calls++;
     // calculate sum of squares
     float ss = 0.0f;
     for (int j = 0; j < size; j++) {
@@ -335,6 +463,7 @@ void rmsnorm(float* o, float* x, float* weight, int size) {
 }
 
 void softmax(float* x, int size) {
+    perf_metrics.softmax_calls++;
     // find max value (for numerical stability)
     float max_val = x[0];
     for (int i = 1; i < size; i++) {
@@ -355,6 +484,7 @@ void softmax(float* x, int size) {
 }
 
 void matmul(float* xout, float* x, float* w, int n, int d) {
+    perf_metrics.matmul_calls++;
     // W (d,n) @ x (n,) -> xout (d,)
     // by far the most amount of time is spent inside this little function
     int i;
@@ -369,6 +499,7 @@ void matmul(float* xout, float* x, float* w, int n, int d) {
 }
 
 float* forward(Transformer* transformer, int token, int pos) {
+    perf_metrics.forward_calls++;
 
     // a few convenience variables
     Config* p = &transformer->config;
@@ -551,7 +682,7 @@ int compare_tokens(const void *a, const void *b) {
  */
 
 void build_tokenizer(Tokenizer* t, void* tokenizer_data, int vocab_size) {
-    printf("Building tokenizer from shared memory...\n");
+    // printf("Building tokenizer from shared memory...\n");
     // i should have written the vocab_size into the tokenizer file... sigh
     t->vocab_size = vocab_size;
     // malloc space to hold the scores and the strings
@@ -592,6 +723,7 @@ void free_tokenizer(Tokenizer* t) {
 }
 
 char* decode(Tokenizer* t, int prev_token, int token) {
+    perf_metrics.decode_calls++;
     char *piece = t->vocab[token];
     // following BOS (1) token, sentencepiece decoder strips any leading whitespace (see PR #89)
     if (prev_token == 1 && piece[0] == ' ') { piece++; }
@@ -609,41 +741,78 @@ void safe_printf(char *piece) {
     // because some of the other bytes can be various control codes, backspace, etc.
     if (piece == NULL) { return; }
     if (piece[0] == '\0') { return; }
+    
+    // Handle byte tokens like <0x0A>
+    if (piece[0] == '<' && piece[1] == '0' && piece[2] == 'x' && piece[5] == '>') {
+        // Parse hex byte token like <0x0A>
+        unsigned char byte_val = 0;
+        for (int i = 3; i < 5; i++) {
+            byte_val <<= 4;
+            if (piece[i] >= '0' && piece[i] <= '9') {
+                byte_val += piece[i] - '0';
+            } else if (piece[i] >= 'A' && piece[i] <= 'F') {
+                byte_val += piece[i] - 'A' + 10;
+            } else if (piece[i] >= 'a' && piece[i] <= 'f') {
+                byte_val += piece[i] - 'a' + 10;
+            }
+        }
+        
+        // Only print if it's printable or whitespace
+        if (isprint(byte_val) || isspace(byte_val)) {
+            printf("%c", byte_val);
+        }
+        return;
+    }
+    
+    // Handle single byte tokens
     if (piece[1] == '\0') {
         unsigned char byte_val = piece[0];
         if (!(isprint(byte_val) || isspace(byte_val))) {
             return; // bad byte, don't print it
         }
     }
+    
     printf("%s", piece);
 }
 
+
 int str_lookup(char *str, TokenIndex *sorted_vocab, int vocab_size) {
-    // Linear search instead of binary search to avoid qsort overhead in xv6
-    // This is slower but avoids stack overflow issues with qsort on large vocab
-    for (int i = 0; i < vocab_size; i++) {
-        if (sorted_vocab[i].str != NULL && strcmp(sorted_vocab[i].str, str) == 0) {
-            return sorted_vocab[i].id;
-        }
-    }
-    return -1;
+    // efficiently find the perfect match for str in vocab, return its index or -1 if not found
+    TokenIndex tok = { .str = str }; // acts as the key to search for
+    TokenIndex *res = bsearch(&tok, sorted_vocab, vocab_size, sizeof(TokenIndex), compare_tokens);
+    return res != NULL ? res->id : -1;
+
+    //   // Linear search instead of binary search to avoid qsort overhead in xv6
+    // // This is slower but avoids stack overflow issues with qsort on large vocab
+    // for (int i = 0; i < vocab_size; i++) {
+    //     if (sorted_vocab[i].str != NULL && strcmp(sorted_vocab[i].str, str) == 0) {
+    //         return sorted_vocab[i].id;
+    //     }
+    // }
+    // return -1;
 }
 
 void encode(Tokenizer* t, char *text, int8_t bos, int8_t eos, int *tokens, int *n_tokens) {
+    perf_metrics.encode_calls++;
     // encode the string text (input) into an upper-bound preallocated tokens[] array
     // bos != 0 means prepend the BOS token (=1), eos != 0 means append the EOS token (=2)
     if (text == NULL) { eprintf("cannot encode NULL text\n"); release_and_exit(EXIT_FAILURE); }
 
+    // print_ram_usage("[encode] starting to encode");
+
     if (t->sorted_vocab == NULL) {
-        // printf("[encode] Allocating sorted_vocab...\n");
-        // lazily malloc and populate the vocabulary (without sorting - using linear search instead)
+        // lazily malloc and sort the vocabulary
         t->sorted_vocab = malloc(t->vocab_size * sizeof(TokenIndex));
+        // print_ram_usage("[encode] allocated sorted_vocab");
         for (int i = 0; i < t->vocab_size; i++) {
             t->sorted_vocab[i].str = t->vocab[i];
             t->sorted_vocab[i].id = i;
         }
+        // printf("Vocab Size: %d, sizeof TokenIndex: %ld\n", t->vocab_size, sizeof(TokenIndex));
+        qsort(t->sorted_vocab, t->vocab_size, sizeof(TokenIndex), compare_tokens);
         // printf("[encode] Vocab populated, skipping qsort (using linear search instead)\n");
     }
+    // print_ram_usage("[encode] sorted_vocab ready");
 
     // create a temporary buffer that will store merge candidates of always two consecutive tokens
     // *2 for concat, +1 for null terminator +2 for UTF8 (in case max_token_length is 1)
@@ -846,7 +1015,7 @@ int sample_topp(float* probabilities, int n, float topp, ProbIndex* probindex, f
 }
 
 void build_sampler(Sampler* sampler, int vocab_size, float temperature, float topp, unsigned long long rng_seed) {
-    printf("Building sampler...\n");
+    // printf("Building sampler...\n");
     sampler->vocab_size = vocab_size;
     sampler->temperature = temperature;
     sampler->topp = topp;
@@ -871,6 +1040,7 @@ float random_f32(unsigned long long *state) { // random float32 in [0,1)
 }
 
 int sample(Sampler* sampler, float* logits) {
+    perf_metrics.sample_calls++;
     // sample the token given the logits and some hyperparameters
     int next;
     if (sampler->temperature == 0.0f) {
@@ -895,30 +1065,26 @@ int sample(Sampler* sampler, float* logits) {
     return next;
 }
 
-// ----------------------------------------------------------------------------
-// utilities: time
-
-long time_in_ms(void) {
-    return (long)(rdtime() / 100000); // 100 MHz = 100,000,000 cycles/sec
-}
 
 // ----------------------------------------------------------------------------
 // generation loop
 
 void generate(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, char *prompt, int steps) {
-    printf("Generating up to %d tokens...\n", steps);
+    // printf("Generating up to %d tokens...\n", steps);
     char *empty_prompt = "";
     if (prompt == NULL) { prompt = empty_prompt; }
 
     // encode the (string) prompt into tokens sequence
     int num_prompt_tokens = 0;
     int* prompt_tokens = (int*)malloc((strlen(prompt)+3) * sizeof(int)); // +3 for '\0', ?BOS, ?EOS
-    printf("Encoding prompt: \"%s\"\n", prompt);
+    // printf("Encoding prompt: \"%s\"\n", prompt);
     encode(tokenizer, prompt, 1, 0, prompt_tokens, &num_prompt_tokens);
     if (num_prompt_tokens < 1) {
         eprintf("something is wrong, expected at least 1 prompt token\n");
         release_and_exit(EXIT_FAILURE);
     }
+
+    // print_ram_usage("[generate] Prompt encoded starting generation");
 
     // start the main loop
     long start = 0;  // used to time our code, only initialized after first iteration
@@ -928,6 +1094,7 @@ void generate(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, 
     while (pos < steps) {
         // forward the transformer to get logits for the next token
         float* logits = forward(transformer, token, pos);
+        // printf("\n[generate] Transformer forward pass complete\n");
 
         // advance the state machine
         if (pos < num_prompt_tokens - 1) {
@@ -938,12 +1105,16 @@ void generate(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, 
             next = sample(sampler, logits);
         }
         pos++;
+        // printf("\n[generate] Sampled next token %d at position %d\n", next, pos);
 
         // data-dependent terminating condition: the BOS (=1) token delimits sequences
         if (next == 1) { break; }
 
         // print the token as string, decode it with the Tokenizer object
         char* piece = decode(tokenizer, token, next);
+
+        // printf("\n[generate] Decoded token piece: %s\n", piece);
+
         safe_printf(piece); // same as printf("%s", piece), but skips "unsafe" bytes
         token = next;
 
@@ -956,6 +1127,9 @@ void generate(Transformer *transformer, Tokenizer *tokenizer, Sampler *sampler, 
     if (pos > 1) {
         long end = time_in_ms();
         eprintf("achieved tok/s: %f\n", (pos-1) / (double)(end-start)*1000);
+        perf_metrics.total_tokens_generated = pos - 1;
+        perf_metrics.total_inference_time_ms = end - start;
+        perf_metrics.tokens_per_second = (pos-1) / (double)(end-start)*1000;
     }
 
     free(prompt_tokens);
@@ -1087,8 +1261,12 @@ void error_usage() {
 }
 
 int main(int argc, char *argv[]) {
-    printf("run: starting...\n");
-    printf("run: argc=%d\n", argc);
+  // print_ram_usage("starting up");
+
+
+
+    // printf("run: starting...\n");
+    // printf("run: argc=%d\n", argc);
 
     // default parameters
     // char *checkpoint_path = NULL;  // e.g. out/model.bin
@@ -1119,7 +1297,7 @@ int main(int argc, char *argv[]) {
         else { error_usage(); }
     }
 
-    printf("run: parsed arguments\n");
+    // printf("run: parsed arguments\n");
 
     // parameter validation/overrides
     if (rng_seed <= 0) rng_seed = (unsigned int)rdtime();
@@ -1127,7 +1305,12 @@ int main(int argc, char *argv[]) {
     if (topp < 0.0 || 1.0 < topp) topp = 0.9;
     if (steps < 0) steps = 0;
 
-    printf("run: fetching weights from shared memory...\n");
+    // Initialize performance metrics
+    perf_metrics.start_time_ms = time_in_ms();
+    perf_metrics.initial_ram_usage = getramused();
+    perf_metrics.peak_ram_usage = perf_metrics.initial_ram_usage;
+
+    // printf("run: fetching weights from shared memory...\n");
 
     // build the Transformer
     Transformer transformer;
@@ -1143,15 +1326,21 @@ int main(int argc, char *argv[]) {
         shmdt(GLOBAL_WEIGHTS_PTR);
         exit(1); 
     }
+    // print_ram_usage("fetched weights and tokenizer from shared memory");
 
     build_transformer(&transformer, GLOBAL_WEIGHTS_PTR);
     build_tokenizer(&tokenizer, GLOBAL_TOKENIZER_PTR, transformer.config.vocab_size);
+    // print_ram_usage("built transformer and tokenizer");
+
+    update_peak_ram();
 
     if (steps == 0 || steps > transformer.config.seq_len) steps = transformer.config.seq_len; // override to ~max length
 
     // build the Sampler
     Sampler sampler;
     build_sampler(&sampler, transformer.config.vocab_size, temperature, topp, rng_seed);
+
+    update_peak_ram();
 
     // run!
     if (strcmp(mode, "generate") == 0) {
@@ -1167,6 +1356,14 @@ int main(int argc, char *argv[]) {
     free_sampler(&sampler);
     free_tokenizer(&tokenizer);
     free_transformer(&transformer);
-    return 0;
+
+    perf_metrics.end_time_ms = time_in_ms();
+    perf_metrics.final_ram_usage = getramused();
+    print_performance_metrics();
+
+    release_and_exit(EXIT_SUCCESS); 
+
+    // Should not reach here. 
+    return -1;
 }
 #endif
