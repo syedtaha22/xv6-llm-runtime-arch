@@ -169,7 +169,6 @@ static uint64 (*syscalls[])(void) = {
 [SYS_shmdt] sys_shmdt,
 [SYS_shmctl] sys_shmctl,
 [SYS_getramused] sys_getramused,
-[SYS_getramused] sys_getramused,
 };
 
 
