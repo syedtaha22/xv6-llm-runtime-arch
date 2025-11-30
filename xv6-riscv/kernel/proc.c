@@ -155,6 +155,9 @@ found:
 static void
 freeproc(struct proc *p)
 {
+  // check if proc has shared resources and clean them up
+  shm_cleanup_proc(p);
+  
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
@@ -169,6 +172,8 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+
+
 }
 
 // Create a user page table for a given process, with no user memory,
