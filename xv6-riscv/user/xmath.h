@@ -127,10 +127,15 @@ float xmod(float x, float y);
 float xexpf(float x);
 
 /**
- * @brief Computes the natural logarithm (ln) of a float value.
- * 
- * @param x Input value 
- * @return Approximation of ln(x)
+ * @brief Calculates the natural logarithm of a positive number using range reduction
+ * to [0.5, 1.0) and a Horner-polynomial approximation for ln(1+y).
+ *
+ * This function first reduces the input `x` to the form x = m * 2^k with m in [0.5,1),
+ * which improves the convergence of the polynomial approximation. After reduction,
+ * Horner's method is used to evaluate the Taylor series for ln(1+y) efficiently.
+ *
+ * @param x The input value (x > 0)
+ * @return The natural logarithm of x
  */
 float xlogf(float x);
 

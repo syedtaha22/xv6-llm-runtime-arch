@@ -12,6 +12,7 @@
  */
 
 #include "kernel/types.h"
+#include "user.h"
 #include "xmath.h"
 
 /****************************************************************************************
@@ -90,6 +91,31 @@
 #define COS_C8 (4.77947733e-14f)             // 1/16!
 #define COS_C9 (-1.56192070e-16f)            // -1/18!
 
+/****************************************************************************************
+ *  ********* Constants for Horner's Method (Taylor Series for ln(1+y) around 0) ******
+ * **************************************************************************************
+ *
+ * The Taylor series for ln(1+y) is y - y^2/2 + y^3/3 - y^4/4 + ...
+ * Factor as polynomial in y = m-1: P(y) = 1 - y/2 + y^2/3 - y^3/4 + ...
+ * For 10 terms, we need coefficients up to y^9:
+ * P(y) = c0 + c1*y + c2*y^2 + ... + c9*y^9
+ * where c_k = (-1)^k / (k+1) for k=1..9
+ *
+ * Coefficients for P(y) = 1 + c1*y + c2*y^2 + ... + c9*y^9
+ * Note: c0 = 1, handled in Horner's evaluation.
+ *
+ * *************************************************************************************/
+
+#define LN_C1   (-0.5f)          // -1/2
+#define LN_C2    0.33333333f     // 1/3
+#define LN_C3   (-0.25f)         // -1/4
+#define LN_C4    0.2f            // 1/5
+#define LN_C5   (-0.16666667f)   // -1/6
+#define LN_C6    0.14285714f     // 1/7
+#define LN_C7   (-0.125f)        // -1/8
+#define LN_C8    0.11111111f     // 1/9
+#define LN_C9   (-0.1f)          // -1/10
+
 float xsqrtf(float x) {
   // Use hardware instruction for the actual computation
   float result;
@@ -140,6 +166,10 @@ float xmod(float x, float y) { // Renamed from fmod to mod
 }
 
 float xexpf(float x) {
+    // Handle special cases
+    if (x == 0.0f) return 1.0f;
+    if (x > 88.0f) return INFINITY;
+    if (x < -88.0f) return 0.0f;
 
     // Range reduction: x = n*ln2 + r
     int n = (int)(x * INV_LN2);
@@ -167,34 +197,28 @@ float xlogf(float x) {
         return NAN;
     }
     if (x == 1.0f) return 0.0f;
-    
-    // Argument reduction
+
+    // Range reduction: x = m * 2^k, m in [0.5, 1)
     int exponent = 0;
-    float y = x;
-    
-    while (y > 1.0f) {
-        y *= 0.5f;
-        exponent++;
-    }
-    while (y < 0.5f) {
-        y *= 2.0f;
-        exponent--;
-    }
-    
-    // Compute ln(y) where y in [0.5, 1.0]
-    float z = y - 1.0f;
-    float result = z - z*z*0.5f;
-    float term = z*z*z;
-    
-    // Series expansion with early termination
-    for (int i = 3; i < 12; i++) {
-        float new_term = term * z / i;
-        result += (i % 2 == 1) ? new_term : -new_term;
-        if (xfabsf(new_term) < 1e-8f) break;
-        term = new_term * i;
-    }
-    
-    return result + exponent * LN2;
+    float m = x;
+    while (m > 1.0f) { m *= 0.5f; exponent++; }
+    while (m < 0.5f) { m *= 2.0f; exponent--; }
+
+    float y = m - 1.0f;
+
+    // Horner's method evaluation for P(y) = c0 + c1*y + c2*y^2 + ... + c9*y^9
+    float result_poly = LN_C9;
+    result_poly = result_poly * y + LN_C8;
+    result_poly = result_poly * y + LN_C7;
+    result_poly = result_poly * y + LN_C6;
+    result_poly = result_poly * y + LN_C5;
+    result_poly = result_poly * y + LN_C4;
+    result_poly = result_poly * y + LN_C3;
+    result_poly = result_poly * y + LN_C2;
+    result_poly = result_poly * y + LN_C1;
+    result_poly = result_poly * y + 1.0f; // Add implicit c0 = 1
+
+    return exponent * LN2 + y * result_poly;
 }
 
 float xpowf(float x, float y) {
@@ -220,7 +244,7 @@ float xpowf(float x, float y) {
             }
         } else {
             // Non-integer exponent with negative base -> NaN
-            return 0.0f / 0.0f;
+            return NAN;
         }
     }
     
@@ -232,7 +256,7 @@ float xsinf(float x) {
     const float period = 2.0f * PI;
 
     // Apply the range reduction formula: PI - mod(x, 2*PI)
-    // The Utils::mod function ensures mod(x, 2*PI) gives a result in [0, 2*PI).
+    // The modx function ensures mod(x, 2*PI) gives a result in [0, 2*PI).
     float reduced_x = PI - xmod(x, period);
     float x_squared = reduced_x * reduced_x; // y = x^2
 
@@ -241,9 +265,9 @@ float xsinf(float x) {
     // Our c0 is effectively 1 for the x(1 - y/3! + ...) form
     // Start with the innermost coefficient (c9) and work outwards.
     // Basically a bunch of FMADD (Multiply-Add) operations.
-    float result_poly = SINE_C9;
-    result_poly = result_poly * x_squared + SINE_C8;
-    result_poly = result_poly * x_squared + SINE_C7;
+    float result_poly = SINE_C7; // 7 terms gives good accuracy/
+    // result_poly = result_poly * x_squared + SINE_C8;
+    // result_poly = result_poly * x_squared + SINE_C7;
     result_poly = result_poly * x_squared + SINE_C6;
     result_poly = result_poly * x_squared + SINE_C5;
     result_poly = result_poly * x_squared + SINE_C4;
@@ -252,7 +276,7 @@ float xsinf(float x) {
     result_poly = result_poly * x_squared + SINE_C1;
     result_poly = result_poly * x_squared + 1.0f; // Add the implicit c0 = 1
 
-    return x * result_poly;
+    return reduced_x* result_poly;
 }
 
 float xcosf(float x) {
@@ -260,7 +284,7 @@ float xcosf(float x) {
     const float period = 2.0f * PI;
 
     // Apply range reduction: PI - mod(x, 2*PI)
-    float reduced_x = PI - xmod(x, period);
+    float reduced_x = xmod(x + PI, period) - PI;
     float x_squared = reduced_x * reduced_x; // y = x^2
 
     // Horner's method evaluation for Q(y) = c0 + c1*y + c2*y^2 + ... + c9*y^9
