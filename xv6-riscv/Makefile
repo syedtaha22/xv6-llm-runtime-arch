@@ -233,6 +233,7 @@ UPROGS=\
 	$U/_testshm\
 	$U/_inference\
 	$U/_run\
+	$U/_testram\
 
 
 

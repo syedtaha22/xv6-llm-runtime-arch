@@ -46,3 +46,6 @@
 #define SYS_rdcycle   39
 #define SYS_rdtime    40
 #define SYS_rdinstret 41
+
+// RAM usage syscall
+#define SYS_getramused 42

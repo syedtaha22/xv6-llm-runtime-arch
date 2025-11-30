@@ -178,3 +178,9 @@ sys_shmctl(void)
 
   return shmctl(shmid, cmd, (void*)buf);
 }
+
+uint64
+sys_getramused(void)
+{
+  return get_used_ram();
+}

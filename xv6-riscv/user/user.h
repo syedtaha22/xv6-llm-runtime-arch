@@ -60,6 +60,9 @@ void* shmat(int, void*, int);
 int shmdt(void*);
 int shmctl(int, int, void*);
 
+// RAM usage function
+uint64 getramused(void);
+
 // ulib.c
 int stat(const char*, struct stat*);
 char* strcpy(char*, const char*);
