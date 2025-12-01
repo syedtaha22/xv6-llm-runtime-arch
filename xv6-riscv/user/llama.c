@@ -1259,6 +1259,8 @@ int argparse(int argc, char* argv[], Args* args) {
 int main(int argc, char* argv[]) {
   // Initialize profiling
   perf_init();
+  perf_register_function("fetch_model_weights");
+  perf_register_function("fetch_tokenizer");
   perf_register_function("build_transformer");
   perf_register_function("build_tokenizer");
   perf_register_function("build_sampler");
@@ -1284,15 +1286,19 @@ int main(int argc, char* argv[]) {
   Transformer transformer; 
   Tokenizer tokenizer;
 
+  perf_start_function("fetch_model_weights");
   GLOBAL_WEIGHTS_PTR = fetch_if_not_cached("llm_weights", WEIGHTS_SIZE, fetch_model_weights);
   if (!GLOBAL_WEIGHTS_PTR) { eprintf("Could not load weights\n"); exit(1); }
+  perf_end_function("fetch_model_weights");
 
+  perf_start_function("fetch_tokenizer");
   GLOBAL_TOKENIZER_PTR = fetch_if_not_cached("llm_tokenizer", TOKENIZER_SIZE, fetch_tokenizer);
   if (!GLOBAL_TOKENIZER_PTR) {
     eprintf("Could not load tokenizer\n");
     shmdt(GLOBAL_WEIGHTS_PTR);
     exit(1);
   }
+  perf_end_function("fetch_tokenizer");
 
   build_transformer(&transformer, GLOBAL_WEIGHTS_PTR);
   build_tokenizer(&tokenizer, GLOBAL_TOKENIZER_PTR, transformer.config.vocab_size);
