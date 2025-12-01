@@ -246,7 +246,15 @@ void perf_update_peak_ram(void) {
 }
 
 long long perf_time_in_ms(void) {
-    return (long long)(rdtime() / 100000); // 100 MHz = 100,000,000 cycles/sec
+    // NOTE: Although some documentation claims a 100 MHz timebase,
+    // xv6 on RISC-V (including QEMU) uses a 10 MHz timer for rdtime().
+    //
+    // rdtime() returns hardware timebase ticks:
+    //     10,000,000 ticks per second
+    //     10,000 ticks per millisecond
+    //
+    // Therefore, dividing by 10,000 converts raw ticks to milliseconds.
+    return (long long)(rdtime() / 10000);
 }
 
 float to_mb(uint64 bytes) {
