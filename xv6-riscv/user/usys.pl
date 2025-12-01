@@ -43,6 +43,10 @@ entry("sbrk");
 entry("pause");
 entry("uptime");
 entry("bind");
+# Syscalls for reading cycle, time, and instret CSRs
+entry("rdcycle");
+entry("rdtime");
+entry("rdinstret");
 entry("unbind");
 entry("send");
 entry("recv");
@@ -52,3 +56,4 @@ entry("shmget");
 entry("shmat");
 entry("shmdt");
 entry("shmctl");
+entry("getramused");

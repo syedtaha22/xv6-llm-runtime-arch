@@ -41,3 +41,11 @@
 #define SYS_shmat     36
 #define SYS_shmdt     37
 #define SYS_shmctl    38
+
+// Syscalls for reading cycle, time, and instret CSRs
+#define SYS_rdcycle   39
+#define SYS_rdtime    40
+#define SYS_rdinstret 41
+
+// RAM usage syscall
+#define SYS_getramused 42

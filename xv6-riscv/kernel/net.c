@@ -659,7 +659,7 @@ ip_rx(char *buf, int len)
   // don't delete this printf; make grade depends on it.
   static int seen_ip = 0;
   if(seen_ip == 0)
-    printf("ip_rx: received an IP packet\n");
+    // printf("ip_rx: received an IP packet\n");
   seen_ip = 1;
 
   // LAYER 2 PROCESSING: Extract Ethernet header
@@ -793,7 +793,7 @@ arp_rx(char *inbuf)
     kfree(inbuf);
     return;
   }
-  printf("arp_rx: received an ARP packet\n");
+  // printf("arp_rx: received an ARP packet\n");
   seen_arp = 1;
 
   struct eth *ineth = (struct eth *) inbuf;

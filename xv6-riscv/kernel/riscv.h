@@ -1,5 +1,40 @@
 #ifndef __ASSEMBLER__
 
+/**
+ * @line  asm volatile("csrr %0, <csr_name>" : "=r" (x));
+ * @brief Reads the value of a RISC-V Control and Status Register (CSR) into a C variable.
+ *
+ * @param csr_name  The name of the CSR to read (e.g., cycle, time, instret).
+ * @param x         A C variable that will hold the value read from the CSR.
+ *
+ * @details
+ * - Uses the RISC-V instruction `csrr` (CSR Read).
+ * - `%0` is a placeholder that the compiler substitutes with a general-purpose register.
+ * - `"=r"(x)` tells the compiler to place the result into `x` through a register.
+ * - `volatile` prevents the compiler from optimizing away or reordering the instruction.
+ *
+ * @example
+ *    uint64 cycles;
+ *    asm volatile("csrr %0, cycle" : "=r" (cycles));
+ *  cycles now contains the current hardware cycle counter.
+ */
+
+static inline uint64
+r_cycle(void)
+{
+  uint64 x;
+  asm volatile("csrr %0, cycle" : "=r" (x));
+  return x;
+}
+
+static inline uint64
+r_instret(void)
+{
+  uint64 x;
+  asm volatile("csrr %0, instret" : "=r" (x));
+  return x;
+}
+
 // which hart (core) is this?
 static inline uint64
 r_mhartid()
