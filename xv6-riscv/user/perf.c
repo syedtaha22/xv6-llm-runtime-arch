@@ -207,7 +207,7 @@ void perf_print_report(void) {
                time_pct);
     }
     printf("==================================================================\n");
-    printf("Total Self Time: %lld ms\n\n", total_self);
+    printf("Total Time: %lld ms\n\n", total_time);
 
     free(sorted_functions);
 
@@ -225,8 +225,11 @@ void perf_print_report(void) {
            to_mb(perf_metrics.final_ram_usage), perf_metrics.final_ram_usage);
 
     printf("\nTIMING:\n");
-    printf("  %15s %8lld ms\n", "Total", total_time);
+    printf("  %15s %8lld ms\n", "Total (E2EL)", total_time);
     printf("  %15s %8lld ms\n", "Inference", perf_metrics.total_inference_time_ms);
+
+    printf("\nLLM METRICS:\n");
+    printf("  %15s %8lld ms\n", "TTFT", perf_metrics.time_to_first_token_ms);
 
     printf("\nTHROUGHPUT:\n");
     printf("  %15s %8d tokens\n", "Generated", perf_metrics.total_tokens_generated);

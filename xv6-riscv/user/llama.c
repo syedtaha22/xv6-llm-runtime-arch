@@ -1004,6 +1004,8 @@ void generate(Transformer* transformer, Tokenizer* tokenizer, Sampler* sampler, 
   int next;        // will store the next token in the sequence
   int token = prompt_tokens[0]; // kick off with the first token in the prompt
   int pos = 0;     // position in the sequence
+  int first_token_generated = 0;  // flag to track when first token is generated
+  
   while (pos < steps) {
     // forward the transformer to get logits for the next token
     float* logits = forward(transformer, token, pos);
@@ -1027,6 +1029,12 @@ void generate(Transformer* transformer, Tokenizer* tokenizer, Sampler* sampler, 
 
     safe_printf(piece); // same as printf("%s", piece), but skips "unsafe" bytes
     token = next;
+
+    // Track Time to First Token (TTFT) - capture when first output token is generated
+    if (!first_token_generated && pos > num_prompt_tokens) {
+      perf_metrics.time_to_first_token_ms = perf_time_in_ms() - perf_metrics.start_time_ms;
+      first_token_generated = 1;
+    }
 
     // init the timer here because the first iteration can be slower
     if (start == 0) { start = time_in_ms(); }
@@ -1167,8 +1175,8 @@ void print_performance_metrics() {
 #ifndef TESTING
 
 void error_usage() {
-  eprintf("Usage:   run [options]\n");
-  eprintf("Example: run model.bin -n 256 -i \"Once upon a time\"\n");
+  eprintf("Usage:   llama [options]\n");
+  eprintf("Example: llama -n 256 -i \"Once upon a time\"\n");
   eprintf("Options:\n");
   eprintf("  -t <float>  temperature in [0,inf], default 1.0\n");
   eprintf("  -p <float>  p value in top-p (nucleus) sampling in [0,1] default 0.9\n");
