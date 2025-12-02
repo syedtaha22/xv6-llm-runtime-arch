@@ -145,7 +145,7 @@ getcmd(char *buf, int nbuf)
 int
 main(void)
 {
-  static char buf[100];
+  static char buf[400];
   int fd;
 
   // Ensure that three file descriptors are open.
@@ -298,6 +298,23 @@ gettoken(char **ps, char *es, char **q, char **eq)
       s++;
     }
     break;
+  case '"':
+    // Handle quoted strings
+    ret = 'a';
+    s++; // Skip opening quote
+    if(q)
+      *q = s; // Start after the opening quote
+    while(s < es && *s != '"')
+      s++;
+    if(eq)
+      *eq = s; // End at the closing quote (content only, no closing quote)
+    if(*s == '"')
+      s++; // Skip closing quote for next token
+    // Skip the generic eq assignment at the end
+    while(s < es && strchr(whitespace, *s))
+      s++;
+    *ps = s;
+    return ret;
   default:
     ret = 'a';
     while(s < es && !strchr(whitespace, *s) && !strchr(symbols, *s))
