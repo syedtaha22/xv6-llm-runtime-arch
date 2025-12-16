@@ -47,6 +47,7 @@ entry("bind");
 entry("rdcycle");
 entry("rdtime");
 entry("rdinstret");
+entry("setpriority");
 entry("unbind");
 entry("send");
 entry("recv");
