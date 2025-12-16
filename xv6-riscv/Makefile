@@ -9,6 +9,10 @@ K=kernel
 U=user
 
 # Scheduler configuration (can be overridden: make SCHED_FLAG=PRIORITY qemu)
+# Options:
+#   PRIORITY - Priority Scheduler
+#   MLFQ     - Multi-Level Feedback Queue Scheduler
+#   (default) - Round Robin Scheduler
 SCHED_FLAG ?=
 
 # Base kernel objects (always compiled)
