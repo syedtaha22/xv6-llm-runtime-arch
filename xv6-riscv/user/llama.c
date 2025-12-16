@@ -156,25 +156,25 @@ void* fetch_if_not_cached(const char* segment_name, int expected_size, char* (*f
   if (shmid >= 0) {
     shmaddr = shmat(shmid, 0, SHM_RDONLY);
     if (shmaddr == (void*)-1) {
-      failnoex(1, "Failed to attach to existing shared memory segment");
+      failnoex(" Failed to attach to existing shared memory segment");
       return 0;
     }
-    pass(1, "Cached data found (segment: %s, ID: %d). Ready for use.", segment_name, shmid);
+    pass(" Cached data found (segment: %s, ID: %d). Ready for use.", segment_name, shmid);
     return shmaddr;
   }
 
   // Segment not found → fetch from server
-  info(1, "No cached data found for %s. Fetching from server...", segment_name);
+  info(" No cached data found for %s. Fetching from server...", segment_name);
   data_buffer = fetch_fn(&size);
   if (!data_buffer || size != expected_size) {
-    failnoex(1, "Failed to fetch %s or size mismatch (got %d, expected %d)", segment_name, size, expected_size);
+    failnoex(" Failed to fetch %s or size mismatch (got %d, expected %d)", segment_name, size, expected_size);
     return 0;
   }
 
   // Create persistent shared memory segment
   shmid = shmget(segment_name, size, IPC_CREAT | SHM_PERSIST);
   if (shmid < 0) {
-    failnoex(1, "Failed to create shared memory segment for %s", segment_name);
+    failnoex(" Failed to create shared memory segment for %s", segment_name);
     free(data_buffer);
     return 0;
   }
@@ -182,7 +182,7 @@ void* fetch_if_not_cached(const char* segment_name, int expected_size, char* (*f
   // Attach and copy data
   shmaddr = shmat(shmid, 0, SHM_RDWR);
   if (shmaddr == (void*)-1) {
-    failnoex(1, "Failed to attach to newly created shared memory segment");
+    failnoex(" Failed to attach to newly created shared memory segment");
     free(data_buffer);
     return 0;
   }
@@ -190,7 +190,7 @@ void* fetch_if_not_cached(const char* segment_name, int expected_size, char* (*f
   memcpy(shmaddr, data_buffer, size);
   free(data_buffer);
 
-  pass(1, "%s fetched and cached in shared memory (ID: %d).\n", segment_name, shmid);
+  pass(" %s fetched and cached in shared memory (ID: %d).\n", segment_name, shmid);
   return shmaddr;
 }
 
@@ -1005,7 +1005,7 @@ void generate(Transformer* transformer, Tokenizer* tokenizer, Sampler* sampler, 
   int token = prompt_tokens[0]; // kick off with the first token in the prompt
   int pos = 0;     // position in the sequence
   int first_token_generated = 0;  // flag to track when first token is generated
-  
+
   while (pos < steps) {
     // forward the transformer to get logits for the next token
     float* logits = forward(transformer, token, pos);
@@ -1193,10 +1193,10 @@ void error_usage() {
 
 /**
  * @brief Structure to hold command-line arguments.
- * 
+ *
  * @author Syed Taha
- * @date   1st December 2025  
- * 
+ * @date   1st December 2025
+ *
  * @details
  * This structure encapsulates the various command-line arguments that can be
  * passed to the program. It includes parameters for temperature, top-p sampling,
@@ -1215,15 +1215,15 @@ typedef struct {
 
 /**
  * @brief Parse command-line arguments and populate the Args structure.
- * 
+ *
  * @param argc Number of command-line arguments.
  * @param argv Array of command-line argument strings.
  * @param args Pointer to Args structure to populate.
  * @return int Returns 0 on success, -1 on failure.
- * 
+ *
  * @author Syed Taha
- * @date   1st December 2025  
- * 
+ * @date   1st December 2025
+ *
  * @details
  * This function processes the command-line arguments provided to the program,
  * extracting values for temperature, top-p sampling, number of steps, input prompt,
@@ -1256,7 +1256,7 @@ int argparse(int argc, char* argv[], Args* args) {
     else { return -1; }
   }
 
-  if (args->rng_seed <=0) args->rng_seed = (unsigned long long)rdtime();
+  if (args->rng_seed <= 0) args->rng_seed = (unsigned long long)rdtime();
   if (args->temperature < 0.0f) args->temperature = 0.0f;
   if (args->topp < 0.0f || args->topp > 1.0f) args->topp = 0.9f;
   if (args->steps < 0) args->steps = 0;
@@ -1290,8 +1290,8 @@ int main(int argc, char* argv[]) {
   perf_metrics.start_time_ms = perf_time_in_ms();
   perf_metrics.initial_ram_usage = getramused();
   perf_metrics.peak_ram_usage = perf_metrics.initial_ram_usage;
-  
-  Transformer transformer; 
+
+  Transformer transformer;
   Tokenizer tokenizer;
 
   perf_start_function("fetch_model_weights");
@@ -1313,7 +1313,7 @@ int main(int argc, char* argv[]) {
 
   update_peak_ram();
 
-  if (args.steps == 0 || args.steps > transformer.config.seq_len) 
+  if (args.steps == 0 || args.steps > transformer.config.seq_len)
     args.steps = transformer.config.seq_len; // override to ~max length
 
   // build the Sampler

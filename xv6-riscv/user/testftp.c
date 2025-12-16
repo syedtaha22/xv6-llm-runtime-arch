@@ -33,12 +33,12 @@ static int test_fetch_file(uint8_t file_id, const char* file_name) {
   file_data = llm_fetch_file(file_id, &file_size);
   if (!file_data) {
     xsprintf(buf, "Failed to fetch %s", file_name);
-    failnoex(1, buf);
+    failnoex(" %s", buf);
     return -1;
   }
 
   xsprintf(buf, "Successfully fetched %s: %d bytes", file_name, file_size);
-  pass(1, buf);
+  pass(" %s", buf);
 
   /* Verify the hash */
   unsigned char hash[32];
@@ -48,7 +48,7 @@ static int test_fetch_file(uint8_t file_id, const char* file_name) {
   sha256_to_hex(hash, hex);
 
   xsprintf(buf, "Final SHA-256: %s", hex);
-  info(2, buf);
+  info("  %s", buf);
 
   free(file_data);
   return 0;
@@ -65,16 +65,16 @@ int main(int argc, char* argv[]) {
 
   set_tag("LLMFTP");
 
-  info(0, "Starting LLM file transfer test...");
+  info("Starting LLM file transfer test...");
 
 
   if (test_fetch_file(FILE_TOKENIZER, "tokenizer") < 0) failed = 1;
 
-  info(0, "---");
+  info("---");
 
   if (test_fetch_file(FILE_WEIGHTS, "weights") < 0) failed = 1;
-  if (failed) fail(0, "LLM file transfer test failed");
+  if (failed) fail("LLM file transfer test failed");
 
-  pass(0, "LLM file transfer test completed");
+  pass("LLM file transfer test completed");
   exit(0);
 }

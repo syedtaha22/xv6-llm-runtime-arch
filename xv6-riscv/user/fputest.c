@@ -154,15 +154,15 @@ static int write_n(int fd, void* buf, int n) {
  * environment and implementation.
  */
 static void test_basic_arithmetic(void) {
-  info(0, "starting basic_arithmetic...");
+  info("starting basic_arithmetic...");
   double a = 1.23456789, b = 9.87654321;
   double s = a + b, e = 11.11111110;
-  if (!approx_eq(s, e, 1e-8)) fail(2, "addition");
+  if (!approx_eq(s, e, 1e-8)) fail("  addition");
   double m = a * b;
-  if (!approx_eq(m / a, b, 1e-9)) fail(2, "multiplication");
+  if (!approx_eq(m / a, b, 1e-9)) fail("  multiplication");
   double d = b / a;
-  if (!approx_eq(d * a, b, 1e-8)) fail(2, "division");
-  pass(2, "basic arithmetic");
+  if (!approx_eq(d * a, b, 1e-8)) fail("  division");
+  pass("  basic arithmetic");
 }
 
 /**
@@ -174,14 +174,14 @@ static void test_basic_arithmetic(void) {
  * within a tolerance bound.
  */
 static void test_precision_accumulation(void) {
-  info(0, "starting precision_accumulation...");
+  info("starting precision_accumulation...");
 
   double inc = 1e-6, sum = 0.0;
   int N = 100000;
   for (int i = 0; i < N; i++) sum += inc;
   double expect = N * inc;
-  if (!approx_eq(sum, expect, 1e-6)) fail(2, "precision accumulation");
-  pass(2, "precision accumulation");
+  if (!approx_eq(sum, expect, 1e-6)) fail("  precision accumulation");
+  pass("  precision accumulation");
 }
 
 /**
@@ -192,16 +192,16 @@ static void test_precision_accumulation(void) {
  * that operations with NaN/Inf produce expected NaN/Inf propagation.
  */
 static void test_special_values(void) {
-  info (0, "starting special_values...");
+  info("starting special_values...");
   double plus_inf = 1.0 / 0.0;
   double minus_inf = -1.0 / 0.0;
   double nanv = 0.0 / 0.0;
   if (!is_inf(plus_inf) || !is_inf(minus_inf) || !is_nan(nanv))
-    fail(2, "special values (Inf/NaN)"); 
+    fail("  special values (Inf/NaN)");
   double a = 1.23;
   double p = a + nanv;
-  if (!is_nan(p)) fail(2, "NaN propagation in addition");
-  pass(2, "special values (Inf/NaN)");
+  if (!is_nan(p)) fail("  NaN propagation in addition");
+  pass("  special values (Inf/NaN)");
 }
 
 /**
@@ -212,17 +212,17 @@ static void test_special_values(void) {
  * values such as Inf + finite => Inf and Inf - Inf => NaN.
  */
 static void test_nan_inf_behaviour(void) {
-  info(0, "starting nan/inf behaviour tests");
+  info("starting nan/inf behaviour tests");
   double nanv = 0.0 / 0.0;
   double infv = 1.0 / 0.0;
   double neginf = -1.0 / 0.0;
-  if (!(nanv != nanv)) fail(2, "NaN comparison semantics");
-  if (!is_inf(infv) || !is_inf(neginf)) fail(2, "Inf detection");
+  if (!(nanv != nanv)) fail("  NaN comparison semantics");
+  if (!is_inf(infv) || !is_inf(neginf)) fail("  Inf detection");
   double a = infv + 1.0;
-  if (!is_inf(a)) fail(2, "Inf + finite should be Inf");
+  if (!is_inf(a)) fail("  Inf + finite should be Inf");
   double r = infv - infv;
-  if (!is_nan(r)) fail(2, "Inf - Inf should be NaN");
-  pass(2, "NaN/Inf comparison and arithmetic semantics"); 
+  if (!is_nan(r)) fail("  Inf - Inf should be NaN");
+  pass("  NaN/Inf comparison and arithmetic semantics");
 }
 
 /* ---- test that forks a single child and needs the child value ----
@@ -249,32 +249,32 @@ static void handle_child_status(struct child_msg* m, double expected_final) {
   case CHILD_STATUS_INIT_MISMATCH:
     printf("    child %d: initial value mismatch (got %f, expected ~%f)\n",
       m->id, m->initial, m->id > 0 ? m->id + 0.123456789 : 6.28318530717958);
-    fail(2, "child initial mismatch");
+    fail("  child initial mismatch");
     break;
   case CHILD_STATUS_NAN_OR_INF:
     printf("    child %d: final value invalid (NaN or Inf)\n", m->id);
-    fail(2, "child final invalid");
+    fail("  child final invalid");
     break;
   case CHILD_STATUS_UNCHANGED:
     printf("    child %d: final value unchanged or incorrect (initial=%f final=%f, expected=%f)\n",
       m->id, m->initial, m->final, expected_final);
-    fail(2, "child final unchanged or incorrect"); 
+    fail("  child final unchanged or incorrect");
     break;
   case CHILD_STATUS_INCORRECT_FINAL:
     printf("    child %d: final value incorrect (got %f, expected %f)\n",
       m->id, m->final, expected_final);
-    fail(2, "child final incorrect");
+    fail("  child final incorrect");
     break;
   case CHILD_STATUS_PIPE_FAIL:
   default:
     printf("    child %d: unknown failure (status=%d)\n", m->id, m->status);
-    fail(2, "child pipe/report failure");
+    fail("  child pipe/report failure");
   }
 
   // Verify parent sees correct final value
   if (!approx_eq(m->final, expected_final, 1e-9)) {
     printf("    parent: observed final %f does not match expected %f\n", m->final, expected_final);
-    fail(2, "parent detected final mismatch");
+    fail("  parent detected final mismatch");
   }
 }
 
@@ -296,15 +296,15 @@ static void handle_child_status(struct child_msg* m, double expected_final) {
  * executed.
  */
 static void test_fork_inherit_and_isolation(void) {
-  info(0, "starting fork_inherit_and_isolation...");
+  info("starting fork_inherit_and_isolation...");
   int fds[2];
-  if (pipe(fds) < 0) fail(2, "pip failed");
+  if (pipe(fds) < 0) fail("  pip failed");
 
   double parent_val = 3.14159265358979 * 2.0;
   double expected_final = 6.33628217556536;
 
   int pid = fork();
-  if (pid < 0) fail(2, "fork failed");
+  if (pid < 0) fail("  fork failed");
 
   if (pid == 0) {
     // Child
@@ -332,13 +332,13 @@ static void test_fork_inherit_and_isolation(void) {
 
     struct child_msg m;
     int n = read_n(fds[0], &m, sizeof(m));
-    if (n != sizeof(m)) fail(2, "fork child failed with no report");
+    if (n != sizeof(m)) fail("  fork child failed with no report");
 
     handle_child_status(&m, expected_final);
 
     printf("    child initial=%f final=%f\n", m.initial, m.final);
     close(fds[0]);
-    pass(2, "fork inherit and isolation");
+    pass("  fork inherit and isolation");
   }
 }
 
@@ -422,18 +422,18 @@ static void child_worker_pipe(int id, int writefd, int iter) {
  * report triggers test failure.
  */
 static void test_concurrent_context_switching(void) {
-  info(0, "concurrent_context_switching (stress)");
+  info("concurrent_context_switching (stress)");
   const int CHILDREN = 10;
   const int ITER = 50000;
   int rfd[CHILDREN], wfd[CHILDREN];
 
   for (int i = 0; i < CHILDREN; i++) {
     int fds[2];
-    if (pipe(fds) < 0) fail(2, "pipe failed in stress");
+    if (pipe(fds) < 0) fail("  pipe failed in stress");
     rfd[i] = fds[0]; wfd[i] = fds[1];
 
     int pid = fork();
-    if (pid < 0) fail(2, "fork failed in stress");
+    if (pid < 0) fail("  fork failed in stress");
     if (pid == 0) {
       close(rfd[i]);
       child_worker_pipe(i + 1, wfd[i], ITER);
@@ -458,7 +458,7 @@ static void test_concurrent_context_switching(void) {
 
     struct child_msg m;
     int n = read_n(rfd[i], &m, sizeof(m));
-    if (n != sizeof(m)) fail(2, "concurrent child no report");
+    if (n != sizeof(m)) fail("  concurrent child no report");
 
     double expected = get_expected(m.id, ITER);
 
@@ -469,7 +469,7 @@ static void test_concurrent_context_switching(void) {
     if (i > 0 && approx_eq(m.final, last_final, 1e-9)) {
       printf("    child %d: final too similar to previous child: %f == %f\n",
         m.id, m.final, last_final);
-      fail(2, "concurrent finals lack diversity");
+      fail("  concurrent finals lack diversity");
     }
 
     last_final = m.final;
@@ -477,9 +477,9 @@ static void test_concurrent_context_switching(void) {
     close(rfd[i]);
   }
 
-  if (is_nan(acc) || is_inf(acc)) 
-    fail(2, "concurrent parent bad state");
-  pass(2, "concurrent context switching (stress)");
+  if (is_nan(acc) || is_inf(acc))
+    fail("  concurrent parent bad state");
+  pass("  concurrent context switching (stress)");
 }
 
 /**
@@ -500,7 +500,7 @@ int main(int argc, char** argv) {
   }
 
   set_tag("FPU");
-  info(0, "=== fputests: starting");
+  info("=== fputests: starting");
 
   test_basic_arithmetic();
   test_precision_accumulation();
@@ -511,6 +511,6 @@ int main(int argc, char** argv) {
 
   while (wait(0) > 0);
 
-  info(0, "=== fputests: all tests passed");
+  info("=== fputests: all tests passed");
   exit(0);
 }
