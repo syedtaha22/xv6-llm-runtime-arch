@@ -168,7 +168,7 @@ $K/%.o: $K/%.S
 tags: $(OBJS)
 	etags kernel/*.S kernel/*.c
 
-ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o $U/testutil.o $U/xstdlib.o $U/xmath.o $U/xstrlib.o
+ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o $U/testutil.o $U/xstdlib.o $U/xmath.o $U/xstrlib.o $U/mutex.o
 
 ifeq ($(LAB),lock)
 ULIB += $U/statistics.o
@@ -185,11 +185,6 @@ $U/_testsha: $U/testsha.o $(ULIB) $U/sha256.o
 	$(OBJDUMP) -S $@ > $U/testsha.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/testsha.sym
 
-$U/_inference: $U/inference.o $(ULIB) $U/ftpclient.o $U/sha256.o
-	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/inference.o $(ULIB) $U/ftpclient.o $U/sha256.o
-	$(OBJDUMP) -S $@ > $U/inference.asm
-	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/inference.sym
-
 $U/_llama: $U/llama.o $U/perf.o $(ULIB) $U/ftpclient.o $U/sha256.o
 	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/llama.o $U/perf.o $(ULIB) $U/ftpclient.o $U/sha256.o
 	$(OBJDUMP) -S $@ > $U/llama.asm
@@ -199,6 +194,11 @@ $U/_testperf: $U/testperf.o $U/perf.o $(ULIB)
 	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/testperf.o $U/perf.o $(ULIB)
 	$(OBJDUMP) -S $@ > $U/testperf.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/testperf.sym
+
+$U/_threadtest: $U/threadtest.o $U/perf.o $(ULIB)
+	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/threadtest.o $U/perf.o $(ULIB)
+	$(OBJDUMP) -S $@ > $U/threadtest.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/threadtest.sym
 
 $U/_schedtest: $U/schedtest.o $(ULIB)
 	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/schedtest.o $(ULIB)
@@ -262,8 +262,8 @@ UPROGS=\
 	$U/_testxstrlib\
 	$U/_testsha\
 	$U/_testshm\
-	$U/_inference\
 	$U/_llama\
+	$U/_threadtest\
 	$U/_testram\
 	$U/_testperf\
 	$U/_schedtest\
@@ -380,7 +380,7 @@ QEMUGDB = $(shell if $(QEMU) -help | grep -q '^-gdb'; \
 	then echo "-gdb tcp::$(GDBPORT)"; \
 	else echo "-s -p $(GDBPORT)"; fi)
 ifndef CPUS
-CPUS := 3
+CPUS := 8
 endif
 ifeq ($(LAB),fs)
 CPUS := 1

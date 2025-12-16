@@ -122,6 +122,12 @@ extern uint64 sys_shmdt(void);
 extern uint64 sys_shmctl(void);
 
 extern uint64 sys_getramused(void);
+
+extern uint64 sys_thread_create(void);
+extern uint64 sys_thread_join(void);
+extern uint64 sys_thread_exit(void);
+extern uint64 sys_yield(void);
+
 extern uint64 sys_setpriority(void);
 
 // An array mapping syscall numbers from syscall.h
@@ -161,12 +167,18 @@ static uint64 (*syscalls[])(void) = {
     [SYS_pgpte] sys_pgpte,
     [SYS_kpgtbl] sys_kpgtbl,
 #endif
-    [SYS_shmget] sys_shmget,
-    [SYS_shmat] sys_shmat,
-    [SYS_shmdt] sys_shmdt,
-    [SYS_shmctl] sys_shmctl,
-    [SYS_getramused] sys_getramused,
-    [SYS_setpriority] sys_setpriority,
+[SYS_shmget] sys_shmget,
+[SYS_shmat] sys_shmat,
+[SYS_shmdt] sys_shmdt,
+[SYS_shmctl] sys_shmctl,
+[SYS_getramused] sys_getramused,
+
+[SYS_thread_create] sys_thread_create,
+[SYS_thread_join]   sys_thread_join,
+[SYS_thread_exit]   sys_thread_exit,
+[SYS_yield]         sys_yield,
+
+[SYS_setpriority] sys_setpriority,
 };
 
 void syscall(void)

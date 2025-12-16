@@ -49,20 +49,20 @@ int main(void) {
   int total = 0;
   int passed = 0;
 
-  for(int i = 0; tests[i]; i++){
-    char *test = tests[i];
+  for (int i = 0; tests[i]; i++) {
+    char* test = tests[i];
     total++;
     printf("==> Running test: %s\n", test);
 
     int pid = fork();
-    if(pid < 0){
+    if (pid < 0) {
       printf("fork failed for %s\n", test);
       continue;
     }
 
-    if(pid == 0){
+    if (pid == 0) {
       // Child: prepare argv for xv6 exec
-      char *argv[2] = { test, 0 };
+      char* argv[2] = { test, 0 };
       exec(test, argv);
 
       // If exec fails
@@ -74,11 +74,11 @@ int main(void) {
     int st;
     wait(&st);
 
-    if(st == 0){
-      pass(2, test);
+    if (st == 0) {
+      pass("  %s", test);
       passed++;
     } else {
-      failnoex(2, test);
+      failnoex("  %s", test);
     }
   }
 

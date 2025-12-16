@@ -81,21 +81,21 @@ int run_test_buf(int test_num, char* title, const unsigned char* buf, int len, c
 
   hex_to_bytes(expected_hex, expected);
 
-  info(0, title);
+  info(title);
   printf("  Input length: %d bytes\n", len);
   printf("  SHA256: ");
   sha256_print(hash);
   printf("\n");
 
   if (hashes_equal(hash, expected)) {
-    pass(0, "Hash matches expected value\n");
+    pass("Hash matches expected value\n");
     return 0;
   }
   else {
     sha256_to_hex(hash, hex_output);
     printf("  Computed: %s\n", hex_output);
     printf("  Expected: %s\n", expected_hex);
-    failnoex(0, "Hash mismatch\n");
+    failnoex("Hash mismatch\n");
     return 1;
   }
 }
@@ -110,7 +110,7 @@ int run_test_buf(int test_num, char* title, const unsigned char* buf, int len, c
  */
 int main() {
   set_tag("SHA256");
-  info(0, "Starting SHA-256 large buffer tests...");
+  info("Starting SHA-256 large buffer tests...");
   printf("\n");
 
   // Buffer sizes to test (in bytes)
@@ -138,7 +138,7 @@ int main() {
     int sz = sizes[t];
     unsigned char* buf = (unsigned char*)malloc(sz);
     if (!buf) {
-      fail(1, "Failed to allocate buffer");
+      fail(" Failed to allocate buffer");
       exit(1);
     }
 
@@ -161,14 +161,6 @@ int main() {
     free(buf);
   }
 
-  printf("Summary: %d/%d tests passed\n", total - failures, total);
+  return summary(total - failures, total);
 
-  if (failures == 0) {
-    pass(0, "All SHA-256 tests pass");
-  }
-  else {
-    fail(0, "Some SHA-256 tests failed");
-  }
-
-  exit(0);
 }

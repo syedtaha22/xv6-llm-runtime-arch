@@ -50,5 +50,13 @@
 // RAM usage syscall
 #define SYS_getramused 42
 
+// Thread syscalls
+#define SYS_thread_create 43
+#define SYS_thread_join   44
+#define SYS_thread_exit   45
+
+// yield syscall
+#define SYS_yield         46
+
 // Scheduler syscall
-#define SYS_setpriority 43
+#define SYS_setpriority   47

@@ -21,20 +21,15 @@
 #define ANSI_PURPLE  "\033[35m"
 #define ANSI_RESET   "\033[0m"
 
-static const char *global_tag = "TEST";
+static const char* global_tag = "TEST";
 
-static void print_indent(int n) {
-  for (int i = 0; i < n; i++)
-    printf(" ");
-}
-
-static void vprint_colored(int level, const char* tag, const char* color, const char* fmt, va_list ap) {
-  print_indent(level);
+static void vprint_colored(const char* tag, const char* color, const char* fmt, va_list ap) {
 
   // Print tag if present
   if (tag && tag[0] != '\0') {
     printf("%s%s   ", color, tag);
-  } else {
+  }
+  else {
     printf("%s", color);
   }
 
@@ -43,42 +38,49 @@ static void vprint_colored(int level, const char* tag, const char* color, const 
   printf("%s\n", ANSI_RESET);
 }
 
-void set_tag(const char *tag) {
+void set_tag(const char* tag) {
   global_tag = tag;
 }
 
-void fail(int level, const char *fmt, ...) {
+void fail(const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  vprint_colored(level, "FAIL", ANSI_RED, fmt, ap);
+  vprint_colored("FAIL", ANSI_RED, fmt, ap);
   va_end(ap);
   exit(1);
 }
 
-void failnoex(int level, const char *fmt, ...) {
+void failnoex(const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  vprint_colored(level, "FAIL", ANSI_RED, fmt, ap);
+  vprint_colored("FAIL", ANSI_RED, fmt, ap);
   va_end(ap);
 }
 
-void pass(int level, const char *fmt, ...) {
+void pass(const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  vprint_colored(level, "PASS", ANSI_GREEN, fmt, ap);
+  vprint_colored("PASS", ANSI_GREEN, fmt, ap);
   va_end(ap);
 }
 
-void warn(int level, const char *fmt, ...) {
+void warn(const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  vprint_colored(level, "WARNING", ANSI_YELLOW, fmt, ap);
+  vprint_colored("WARNING", ANSI_YELLOW, fmt, ap);
   va_end(ap);
 }
 
-void info(int level, const char *fmt, ...) {
+void info(const char* fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
-  vprint_colored(level, "", ANSI_PURPLE, fmt, ap);
+  vprint_colored("", ANSI_PURPLE, fmt, ap);
   va_end(ap);
+}
+
+int summary(int passed, int total) {
+  info("========== %s SUMMARY ==========", global_tag);
+  info("        Tests passed: %d / %d", passed, total);
+  info("====================================");
+  return (passed == total) ? 0 : 1;
 }

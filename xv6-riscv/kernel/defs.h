@@ -110,6 +110,34 @@ int             either_copyout(int user_dst, uint64 dst, void *src, uint64 len);
 int             either_copyin(void *dst, int user_src, uint64 src, uint64 len);
 void            procdump(void);
 
+/**
+ * @brief Create a new thread in the same address space as the caller.
+ * 
+ * Defined in kernel/proc.c
+ * 
+ * @param start_routine The function pointer where the thread starts execution.
+ * @param arg The argument to pass to the start_routine.
+ */
+int thread_create(uint64 start_routine, uint64 arg);
+
+/**
+ * @brief Wait for a thread with the given thread ID to terminate.
+ * 
+ * Defined in kernel/proc.c
+ * 
+ * @param thread_id The thread ID of the thread to wait for.
+ * @return int Returns 0 on success, -1 on failure.
+ */
+int thread_join(int thread_id);
+
+/**
+ * @brief Exit the current thread. Does not free shared user pages; marks thread
+ * ZOMBIE and wakes up any joiners.
+ * 
+ * Defined in kernel/proc.c
+ */
+void thread_exit(void);
+
 // swtch.S
 void            swtch(struct context*, struct context*);
 
@@ -186,6 +214,9 @@ int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
 int             ismapped(pagetable_t, uint64);
 uint64          vmfault(pagetable_t, uint64, int);
+void            freewalk(pagetable_t pagetable);
+int             uvmshare(pagetable_t old, pagetable_t new, uint64 sz); // Share mappings from one pagetable into another (used for threads)
+
 #if defined(LAB_PGTBL) || defined(SOL_MMAP)
 void            vmprint(pagetable_t);
 #endif
