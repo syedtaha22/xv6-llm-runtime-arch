@@ -144,4 +144,13 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  // Thread support
+  int is_thread;               // non-zero if this proc is a thread
+  struct proc *thread_group;   // main process (thread group leader)
+  int tid;                     // thread id (same as pid)
+  
+  // Thread list support (for group leader and members)
+  struct proc *thread_head;    // head of threads list (for group leader)
+  struct proc *thread_next;    // next pointer (for thread list links)
 };

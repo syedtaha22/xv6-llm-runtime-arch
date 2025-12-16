@@ -161,8 +161,21 @@ freeproc(struct proc *p)
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;
-  if(p->pagetable)
-    proc_freepagetable(p->pagetable, p->sz);
+  if(p->pagetable){
+    if(p->is_thread){
+      // Threads had their own pagetable in an earlier design; ensure we
+      // don't free shared user pages. Unmap trampoline/trapframe/user
+      // mappings from this pagetable but do not free underlying pages.
+      uvmunmap(p->pagetable, TRAMPOLINE, 1, 0);
+      uvmunmap(p->pagetable, TRAPFRAME, 1, 0);
+      if (p->sz > 0) {
+        uvmunmap(p->pagetable, 0, PGROUNDUP(p->sz)/PGSIZE, 0);
+      }
+      freewalk(p->pagetable);
+    } else {
+      proc_freepagetable(p->pagetable, p->sz);
+    }
+  }
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -172,6 +185,218 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  if(p->is_thread){
+    // unlink from group's thread list
+    struct proc *leader = p->thread_group;
+    if(leader){
+      // If the caller already holds the leader lock, don't try to
+      // acquire it again (would panic in acquire()). Check and
+      // perform the unlink accordingly.
+      if(holding(&leader->lock)){
+        struct proc **pp = &leader->thread_head;
+        while(*pp && *pp != p)
+          pp = &(*pp)->thread_next;
+        if(*pp == p)
+          *pp = p->thread_next;
+      } else {
+        acquire(&leader->lock);
+        struct proc **pp = &leader->thread_head;
+        while(*pp && *pp != p)
+          pp = &(*pp)->thread_next;
+        if(*pp == p)
+          *pp = p->thread_next;
+        release(&leader->lock);
+      }
+    }
+
+    p->is_thread = 0;
+    p->thread_group = 0;
+    p->tid = 0;
+    p->thread_next = 0;
+  }
+}
+
+// Create a new thread in the same address space as the caller
+int thread_create(uint64 start_routine, uint64 arg) {
+  struct proc *np;
+  struct proc *p = myproc();
+  struct proc *main_proc = p->is_thread ? p->thread_group : p;
+  uint64 oldsz;
+
+  if((np = allocproc()) == 0)
+    return -1;
+
+  np->is_thread = 1;
+  np->thread_group = main_proc;
+  np->tid = np->pid;
+  // link into main process thread list
+  acquire(&main_proc->lock);
+  np->thread_next = main_proc->thread_head;
+  main_proc->thread_head = np;
+  release(&main_proc->lock);
+
+  // Create a pagetable for the thread and map trampoline/trapframe.
+  if((np->pagetable = proc_pagetable(np)) == 0){
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
+
+  // Share user memory mappings with main process.
+  if(uvmshare(main_proc->pagetable, np->pagetable, main_proc->sz) < 0){
+    proc_freepagetable(np->pagetable, 0);
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
+
+  // Allocate a new user stack page at a page-aligned address at the
+  // top of the address space and map it into the new thread's pagetable.
+  oldsz = main_proc->sz;
+  uint64 stack_va = PGROUNDUP(oldsz);
+  if(uvmalloc(main_proc->pagetable, oldsz, stack_va + PGSIZE, PTE_W) == 0){
+    proc_freepagetable(np->pagetable, 0);
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
+  main_proc->sz = stack_va + PGSIZE;
+
+  // Map the newly allocated page into the thread's pagetable at the
+  // same page-aligned virtual address.
+  pte_t *pte = walk(main_proc->pagetable, stack_va, 0);
+  if(pte == 0){
+    proc_freepagetable(np->pagetable, 0);
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
+  uint64 pa = PTE2PA(*pte);
+  if(mappages(np->pagetable, stack_va, PGSIZE, pa, PTE_R|PTE_W|PTE_U) != 0){
+    proc_freepagetable(np->pagetable, 0);
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
+
+  np->sz = main_proc->sz;
+
+  // Update sz for existing threads in this group (iterate thread list only).
+  struct proc *tt;
+  acquire(&main_proc->lock);
+  for(tt = main_proc->thread_head; tt; tt = tt->thread_next){
+    if(tt != np){
+      acquire(&tt->lock);
+      tt->sz = main_proc->sz;
+      release(&tt->lock);
+    }
+  }
+  release(&main_proc->lock);
+
+  // Set up trapframe to start at start_routine with argument in a0
+  *(np->trapframe) = *(main_proc->trapframe);
+  np->trapframe->a0 = arg;
+  np->trapframe->sp = stack_va + PGSIZE;
+  np->trapframe->epc = start_routine;
+
+  // copy file descriptors and cwd
+  for(int i = 0; i < NOFILE; i++)
+    if(main_proc->ofile[i])
+      np->ofile[i] = filedup(main_proc->ofile[i]);
+  np->cwd = idup(main_proc->cwd);
+
+  safestrcpy(np->name, main_proc->name, sizeof(np->name));
+
+  release(&np->lock);
+
+  acquire(&wait_lock);
+  np->parent = main_proc;
+  release(&wait_lock);
+
+  acquire(&np->lock);
+  np->state = RUNNABLE;
+  release(&np->lock);
+
+  // Propagate new size to other threads in the group.
+  struct proc *t;
+  for(t = proc; t < &proc[NPROC]; t++){
+    if(t->is_thread && t->thread_group == main_proc && t != np && t->state != UNUSED){
+      acquire(&t->lock);
+      t->sz = main_proc->sz;
+      release(&t->lock);
+    }
+  }
+
+  return np->tid;
+}
+
+// Block until a thread in the same group with id thread_id exits.
+int
+thread_join(int thread_id)
+{
+  int havekids;
+  struct proc *p = myproc();
+  struct proc *main_proc = p->is_thread ? p->thread_group : p;
+
+  acquire(&wait_lock);
+
+  for(;;){
+    // Scan only the thread list for this group leader.
+    struct proc *t;
+    acquire(&main_proc->lock);
+    for(t = main_proc->thread_head; t; t = t->thread_next){
+      if(t->tid == thread_id){
+        acquire(&t->lock);
+        if(t->state == ZOMBIE){
+          freeproc(t);
+          release(&t->lock);
+          release(&wait_lock);
+          release(&main_proc->lock);
+          return 0;
+        }
+        release(&t->lock);
+        havekids = 1;
+      }
+    }
+    release(&main_proc->lock);
+
+    if(!havekids || killed(p)){
+      release(&wait_lock);
+      return -1;
+    }
+
+    sleep(main_proc, &wait_lock);
+  }
+}
+
+// Exit current thread. Does not free shared user pages; marks thread
+// ZOMBIE and wakes up any joiners.
+void
+thread_exit(void)
+{
+  struct proc *p = myproc();
+
+  if(!p->is_thread){
+    kexit(0);
+    return; // not reached
+  }
+
+  // Optimized thread exit: do not close shared resources (files/cwd).
+  // Closing files and doing filesystem operations here is expensive
+  // and should be handled by the main process when the whole process
+  // exits. We only mark the thread ZOMBIE and wake joiners.
+
+  acquire(&wait_lock);
+  // Wake any joiners waiting on the thread group leader.
+  wakeup(p->thread_group);
+
+  acquire(&p->lock);
+  p->xstate = 0;
+  p->state = ZOMBIE;
+  release(&wait_lock);
+
+  sched();
+  panic("zombie thread exit");
 }
 
 // Create a user page table for a given process, with no user memory,

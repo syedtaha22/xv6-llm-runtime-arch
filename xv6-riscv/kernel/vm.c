@@ -484,6 +484,37 @@ vmfault(pagetable_t pagetable, uint64 va, int read)
   return mem;
 }
 
+/**
+ * @brief Share user mappings from old pagetable into new pagetable up to sz bytes.
+ * Does not copy physical pages, only creates mappings to the same physical
+ * pages in the new pagetable.
+ * 
+ * @param old The old pagetable from which to share mappings.
+ * @param new The new pagetable where mappings will be created.
+ * @param sz The size in bytes up to which to share mappings.
+ * @return int returns 0 on success, -1 on failure.
+ */
+int
+uvmshare(pagetable_t old, pagetable_t new, uint64 sz)
+{
+  pte_t *pte;
+  uint64 pa;
+  int flags;
+
+  for(uint64 i = 0; i < sz; i += PGSIZE){
+    if((pte = walk(old, i, 0)) == 0)
+      panic("uvmshare: pte should exist");
+    if((*pte & PTE_V) == 0)
+      panic("uvmshare: page not present");
+    pa = PTE2PA(*pte);
+    flags = PTE_FLAGS(*pte);
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
+      return -1;
+    }
+  }
+  return 0;
+}
+
 int
 ismapped(pagetable_t pagetable, uint64 va)
 {

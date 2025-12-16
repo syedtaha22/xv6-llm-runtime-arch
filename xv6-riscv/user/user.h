@@ -63,6 +63,17 @@ int shmctl(int, int, void*);
 // RAM usage function
 uint64 getramused(void);
 
+int yield(void);
+
+// Threads and mutexes
+int thread_create(void (*start_routine)(void*), void *arg);
+int thread_join(int thread_id);
+void thread_exit(void);
+
+int mutex_init(int *mutex);
+void mutex_lock(int *mutex);
+void mutex_unlock(int *mutex);
+
 // ulib.c
 int stat(const char*, struct stat*);
 char* strcpy(char*, const char*);

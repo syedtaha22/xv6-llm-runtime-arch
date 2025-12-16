@@ -57,3 +57,7 @@ entry("shmat");
 entry("shmdt");
 entry("shmctl");
 entry("getramused");
+entry("thread_create");
+entry("thread_join");
+entry("thread_exit");
+entry("yield");

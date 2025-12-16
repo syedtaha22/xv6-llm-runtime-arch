@@ -184,3 +184,35 @@ sys_getramused(void)
 {
   return get_used_ram();
 }
+
+uint64 
+sys_thread_create(void)
+{
+  uint64 start_routine;
+  uint64 arg;
+  argaddr(0, &start_routine);
+  argaddr(1, &arg);
+  return thread_create(start_routine, arg);
+}
+
+uint64
+sys_thread_join(void)
+{
+  int thread_id;
+  argint(0, &thread_id);
+  return thread_join(thread_id);
+}
+
+uint64
+sys_thread_exit(void)
+{
+  thread_exit();
+  return 0;
+}
+
+uint64
+sys_yield(void)
+{
+  yield();
+  return 0;
+}

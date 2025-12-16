@@ -80,7 +80,7 @@ void info(const char* fmt, ...) {
 
 int summary(int passed, int total) {
   info("========== %s SUMMARY ==========", global_tag);
-  info("Tests passed: %d / %d", passed, total);
+  info("        Tests passed: %d / %d", passed, total);
   info("====================================");
   return (passed == total) ? 0 : 1;
 }
