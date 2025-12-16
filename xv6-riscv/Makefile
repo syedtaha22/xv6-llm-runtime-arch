@@ -8,13 +8,20 @@
 K=kernel
 U=user
 
+# Scheduler configuration (can be overridden: make SCHED_FLAG=PRIORITY qemu)
+# Options:
+#   PRIORITY - Priority Scheduler
+#   MLFQ     - Multi-Level Feedback Queue Scheduler
+#   (default) - Round Robin Scheduler
+SCHED_FLAG ?=
+
+# Base kernel objects (always compiled)
 OBJS = \
   $K/entry.o \
   $K/kalloc.o \
   $K/string.o \
   $K/main.o \
   $K/vm.o \
-  $K/proc.o \
   $K/swtch.o \
   $K/trampoline.o \
   $K/trap.o \
@@ -32,6 +39,20 @@ OBJS = \
   $K/kernelvec.o \
   $K/plic.o \
   $K/virtio_disk.o
+
+# Conditional scheduler compilation based on SCHED_FLAG
+ifeq ($(SCHED_FLAG),PRIORITY)
+  # Priority scheduler: use sched_priority.c instead of proc.c scheduler
+  CFLAGS += -DPRIORITY_SCHED
+  OBJS += $K/sched_priority.o
+else ifeq ($(SCHED_FLAG),MLFQ)
+  # MLFQ scheduler: use sched_mlfq.c instead of proc.c scheduler
+  CFLAGS += -DMLFQ_SCHED
+  OBJS += $K/sched_mlfq.o
+endif
+
+# Always include proc.o (contains process management, not just scheduler)
+OBJS += $K/proc.o
 
 OBJS_KCSAN = \
   $K/start.o \
@@ -164,11 +185,6 @@ $U/_testsha: $U/testsha.o $(ULIB) $U/sha256.o
 	$(OBJDUMP) -S $@ > $U/testsha.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/testsha.sym
 
-$U/_inference: $U/inference.o $(ULIB) $U/ftpclient.o $U/sha256.o
-	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/inference.o $(ULIB) $U/ftpclient.o $U/sha256.o
-	$(OBJDUMP) -S $@ > $U/inference.asm
-	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/inference.sym
-
 $U/_llama: $U/llama.o $U/perf.o $(ULIB) $U/ftpclient.o $U/sha256.o
 	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/llama.o $U/perf.o $(ULIB) $U/ftpclient.o $U/sha256.o
 	$(OBJDUMP) -S $@ > $U/llama.asm
@@ -183,6 +199,11 @@ $U/_threadtest: $U/threadtest.o $U/perf.o $(ULIB)
 	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/threadtest.o $U/perf.o $(ULIB)
 	$(OBJDUMP) -S $@ > $U/threadtest.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/threadtest.sym
+
+$U/_schedtest: $U/schedtest.o $(ULIB)
+	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/schedtest.o $(ULIB)
+	$(OBJDUMP) -S $@ > $U/schedtest.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/schedtest.sym
 
 _%: %.o $(ULIB) $U/user.ld
 	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $< $(ULIB)
@@ -241,11 +262,11 @@ UPROGS=\
 	$U/_testxstrlib\
 	$U/_testsha\
 	$U/_testshm\
-	$U/_inference\
 	$U/_llama\
 	$U/_threadtest\
 	$U/_testram\
 	$U/_testperf\
+	$U/_schedtest\
 
 
 ifeq ($(LAB),util)
@@ -378,13 +399,31 @@ QEMUOPTS += -netdev user,id=net0,hostfwd=udp::$(FWDPORT1)-:2000,hostfwd=udp::$(F
 QEMUOPTS += -device e1000,netdev=net0,bus=pcie.0
 endif
 
-# makes a new fs.img
+# makes a new fs.img (default Round Robin scheduler)
 qemu: check-qemu-version newfs.img $K/kernel fs.img
 	$(QEMU) $(QEMUOPTS)
 
 # runs with existing fs.img, if present
 qemu-fs: check-qemu-version $K/kernel fs.img
 	$(QEMU) $(QEMUOPTS)
+
+# Convenience targets for different schedulers
+# Usage: make qemu-priority  or  make qemu-mlfq
+
+# Run with Priority Scheduler
+qemu-priority: clean
+	@echo "Building xv6 with Priority Scheduler..."
+	$(MAKE) SCHED_FLAG=PRIORITY qemu
+
+# Run with MLFQ Scheduler
+qemu-mlfq: clean
+	@echo "Building xv6 with MLFQ Scheduler..."
+	$(MAKE) SCHED_FLAG=MLFQ qemu
+
+# Run with default Round Robin Scheduler
+qemu-rr: clean
+	@echo "Building xv6 with Round Robin Scheduler (default)..."
+	$(MAKE) qemu
 
 .gdbinit: .gdbinit.tmpl-riscv
 	sed "s/:1234/:$(GDBPORT)/" < $^ > $@
