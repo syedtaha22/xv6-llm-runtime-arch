@@ -28,6 +28,10 @@ int link(const char*, const char*);
 int mkdir(const char*);
 int chdir(const char*);
 int dup(int);
+// User stubs for reading cycle, time, and instret CSRs
+uint64 rdcycle(void);
+uint64 rdtime(void);
+uint64 rdinstret(void);
 int getpid(void);
 char* sys_sbrk(int,int);
 int pause(int);
@@ -55,6 +59,9 @@ int shmget(const char*, uint64, int);
 void* shmat(int, void*, int);
 int shmdt(void*);
 int shmctl(int, int, void*);
+
+// RAM usage function
+uint64 getramused(void);
 
 // ulib.c
 int stat(const char*, struct stat*);
@@ -84,6 +91,7 @@ int statistics(void*, int);
 // printf.c
 void fprintf(int, const char*, ...) __attribute__ ((format (printf, 2, 3)));
 void printf(const char*, ...) __attribute__ ((format (printf, 1, 2)));
+void vprintf(int fd, const char *fmt, va_list ap);
 void printf_set_indent(int);
 void printf_reset_indent(void);
 

@@ -164,6 +164,21 @@ $U/_testsha: $U/testsha.o $(ULIB) $U/sha256.o
 	$(OBJDUMP) -S $@ > $U/testsha.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/testsha.sym
 
+$U/_inference: $U/inference.o $(ULIB) $U/ftpclient.o $U/sha256.o
+	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/inference.o $(ULIB) $U/ftpclient.o $U/sha256.o
+	$(OBJDUMP) -S $@ > $U/inference.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/inference.sym
+
+$U/_llama: $U/llama.o $U/perf.o $(ULIB) $U/ftpclient.o $U/sha256.o
+	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/llama.o $U/perf.o $(ULIB) $U/ftpclient.o $U/sha256.o
+	$(OBJDUMP) -S $@ > $U/llama.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/llama.sym
+
+$U/_testperf: $U/testperf.o $U/perf.o $(ULIB)
+	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/testperf.o $U/perf.o $(ULIB)
+	$(OBJDUMP) -S $@ > $U/testperf.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/testperf.sym
+
 _%: %.o $(ULIB) $U/user.ld
 	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $< $(ULIB)
 	$(OBJDUMP) -S $@ > $*.asm
@@ -221,7 +236,10 @@ UPROGS=\
 	$U/_testxstrlib\
 	$U/_testsha\
 	$U/_testshm\
-
+	$U/_inference\
+	$U/_llama\
+	$U/_testram\
+	$U/_testperf\
 
 
 ifeq ($(LAB),util)

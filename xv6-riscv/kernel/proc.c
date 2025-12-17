@@ -155,6 +155,9 @@ found:
 static void
 freeproc(struct proc *p)
 {
+  // check if proc has shared resources and clean them up
+  shm_cleanup_proc(p);
+  
   if(p->trapframe)
     kfree((void*)p->trapframe);
   p->trapframe = 0;

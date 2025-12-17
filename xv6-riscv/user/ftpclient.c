@@ -123,7 +123,7 @@ int llm_meta_request(uint8_t file_id, uint32_t* file_size, uint32_t* total_chunk
     unbind(port);
     return -1;
   }
-  printf("META_REQ sent, waiting for response...\n");
+  // printf("META_REQ sent, waiting for response...\n");
 
   // Receive response
   unsigned char resp[48];
@@ -323,7 +323,7 @@ static int handle_missing_chunks(transfer_ctx_t* ctx, uint8_t file_id, uint16_t 
     get_missing_in_range(ctx, start, start + MAX_RETRANS, missing_indices, &missing_count);
 
     if (missing_count > 0) {
-      printf("\nRequesting retransmission of %d missing chunks...", missing_count);
+      // printf("\nRequesting retransmission of %d missing chunks...", missing_count);
 
       if (llm_retrans_request(file_id, missing_indices, missing_count) == 0) {
         // Receive retransmitted packets
@@ -401,7 +401,7 @@ char* llm_fetch_file(uint8_t file_id, int* size_out) {
   transfer_ctx_t ctx;
   uint16_t client_port = 10000 + (getpid() % 1000);
 
-  printf("Starting file transfer for file_id=%d\n", file_id);
+  // printf("Starting file transfer for file_id=%d\n", file_id);
 
   // Step 1: Request metadata
   if (llm_meta_request(file_id, &file_size, &total_chunks, expected_hash) < 0) {
@@ -409,7 +409,7 @@ char* llm_fetch_file(uint8_t file_id, int* size_out) {
     return 0;
   }
 
-  printf("File metadata: size=%d, total_chunks=%d\n", file_size, total_chunks);
+  // printf("File metadata: size=%d, total_chunks=%d\n", file_size, total_chunks);
 
   // Allocate transfer context
   ctx.file_buf = malloc(file_size);
@@ -437,7 +437,7 @@ char* llm_fetch_file(uint8_t file_id, int* size_out) {
   }
 
   // Step 2: Request all chunks in batches
-  printf("[Attempt 1] Requesting %d chunks...\n", total_chunks);
+  // printf("[Attempt 1] Requesting %d chunks...\n", total_chunks);
   for (uint32_t start_idx = 0; start_idx < total_chunks; start_idx += MAX_RANGE) {
     uint16_t count = (start_idx + MAX_RANGE > total_chunks) ?
       (total_chunks - start_idx) : MAX_RANGE;
@@ -463,7 +463,7 @@ char* llm_fetch_file(uint8_t file_id, int* size_out) {
   }
 
   // Step 4: Verify integrity
-  printf("All chunks received. Verifying integrity...\n");
+  // printf("All chunks received. Verifying integrity...\n");
 
   if (!verify_file_integrity(ctx.file_buf, file_size, expected_hash)) {
     printf("SHA-256 verification failed!\n");
@@ -473,7 +473,7 @@ char* llm_fetch_file(uint8_t file_id, int* size_out) {
     return 0;
   }
 
-  printf("File transfer completed successfully\n");
+  // printf("File transfer completed successfully\n");
   unbind(client_port);
   free(ctx.received);
   *size_out = file_size;
@@ -482,12 +482,12 @@ char* llm_fetch_file(uint8_t file_id, int* size_out) {
 
 // LLM-specific wrapper functions
 char* fetch_model_weights(int* size_out) {
-  printf("Fetching model weights (stories15M.bin)...\n");
+  // printf("Fetching model weights (stories15M.bin)...\n");
   return llm_fetch_file(FILE_WEIGHTS, size_out);
 }
 
 char* fetch_tokenizer(int* size_out) {
-  printf("Fetching tokenizer (tokenizer.bin)...\n");
+  // printf("Fetching tokenizer (tokenizer.bin)...\n");
   return llm_fetch_file(FILE_TOKENIZER, size_out);
 }
 

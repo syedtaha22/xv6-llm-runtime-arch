@@ -80,3 +80,19 @@ kalloc(void)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
 }
+
+uint64
+get_used_ram(void)
+{
+  int total_pages = (PHYSTOP - (uint64)end) / PGSIZE;
+  int free_pages = 0;
+  struct run *r;
+
+  acquire(&kmem.lock);
+  for(r = kmem.freelist; r; r = r->next)
+    free_pages++;
+  release(&kmem.lock);
+
+  int used_pages = total_pages - free_pages;
+  return (uint64)used_pages * PGSIZE;
+}
