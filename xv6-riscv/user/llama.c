@@ -253,6 +253,60 @@ typedef struct {
   // some more state needed to properly clean up the memory mapping (sigh)
 } Transformer;
 
+/**
+ * @brief Multithreading support for parallelizing LLM inference in xv6.
+ * 
+ * @details
+ * This section adds multithreading support for parallelizing computationally
+ * intensive operations in the llama2.c implementation. We parallelize:
+ * 1. Matrix multiplication (matmul) - outer loop over output dimension
+ * 2. Attention mechanism - loop over attention heads
+ * 3. Feed-forward network layers - matmul operations
+ * 
+ * The parallelization follows the same patterns as the original OpenMP
+ * pragmas that were removed in Milestone 4.
+ */
+
+// Threading library includes
+extern int thread_create(void (*start_routine)(void*), void *arg);
+extern int thread_join(int thread_id);
+extern void thread_exit(void);
+extern int mutex_init(int *mutex);
+extern void mutex_lock(int *mutex);
+extern void mutex_unlock(int *mutex);
+
+// Thread configuration
+#ifndef NUM_THREADS
+#define NUM_THREADS 3  // Default to 3 threads 
+#endif
+
+// Thread argument structures
+typedef struct {
+    float* xout;
+    float* x;
+    float* w;
+    int n;
+    int d;
+    int start_i;
+    int end_i;
+} MatmulThreadArg;
+
+typedef struct {
+    Transformer* transformer;
+    int layer;
+    int start_head;
+    int end_head;
+    int pos;
+    int head_size;
+    int kv_dim;
+    int kv_mul;
+    int loff;
+} AttentionThreadArg;
+
+// Thread function prototypes
+void matmul_thread_func(void* arg);
+void attention_thread_func(void* arg);
+
 void malloc_run_state(RunState* s, Config* p) {
   // we calloc instead of malloc to keep valgrind happy
   int kv_dim = (p->dim * p->n_kv_heads) / p->n_heads;
@@ -398,20 +452,154 @@ void softmax(float* x, int size) {
   perf_end_function("softmax");
 }
 
+/**
+ * @brief Parallel matrix multiplication using multithreading.
+ * 
+ * @param xout Output vector (size d)
+ * @param x Input vector (size n)
+ * @param w Weight matrix (size d x n)
+ * @param n Input dimension
+ * @param d Output dimension
+ * 
+ * @details
+ * Parallelizes the outer loop over output dimension (d) across multiple threads.
+ * Each thread computes a contiguous block of output elements. This follows the
+ * same pattern as the original OpenMP pragma that was removed.
+ * 
+ * Performance considerations:
+ * - No synchronization needed: each thread writes to disjoint output regions
+ * - Memory access pattern: each thread reads entire input vector x
+ * - Cache efficiency: weight matrix accessed row-wise by each thread
+ */
 void matmul(float* xout, float* x, float* w, int n, int d) {
-  perf_start_function("matmul");
-  // W (d,n) @ x (n,) -> xout (d,)
-  // by far the most amount of time is spent inside this little function
-  int i;
-  // #pragma omp parallel for private(i)
-  for (i = 0; i < d; i++) {
-    float val = 0.0f;
-    for (int j = 0; j < n; j++) {
-      val += w[i * n + j] * x[j];
+    perf_start_function("matmul");
+    
+    // Thread management
+    int thread_ids[NUM_THREADS];
+    MatmulThreadArg args[NUM_THREADS];
+    
+    // Calculate chunk size for each thread
+    int chunk_size = (d + NUM_THREADS - 1) / NUM_THREADS;
+    
+    // Create threads
+    for (int t = 0; t < NUM_THREADS; t++) {
+        int start_i = t * chunk_size;
+        int end_i = (t + 1) * chunk_size;
+        if (end_i > d) end_i = d;
+        
+        // Only create thread if there's work to do
+        if (start_i < d) {
+            args[t].xout = xout;
+            args[t].x = x;
+            args[t].w = w;
+            args[t].n = n;
+            args[t].d = d;
+            args[t].start_i = start_i;
+            args[t].end_i = end_i;
+            
+            thread_ids[t] = thread_create(matmul_thread_func, &args[t]);
+        } else {
+            thread_ids[t] = -1;  // No work for this thread
+        }
     }
-    xout[i] = val;
-  }
-  perf_end_function("matmul");
+    
+    // Wait for all threads to complete
+    for (int t = 0; t < NUM_THREADS; t++) {
+        if (thread_ids[t] != -1) {
+            thread_join(thread_ids[t]);
+        }
+    }
+    
+    perf_end_function("matmul");
+}
+
+/**
+ * @brief Thread function for parallel matrix multiplication.
+ * 
+ * @param arg MatmulThreadArg structure containing work range
+ * 
+ * @details
+ * Each thread computes a contiguous block of the output vector:
+ *   xout[i] = Σ_j w[i*n + j] * x[j]  for i in [start_i, end_i)
+ * 
+ * No synchronization is required as each thread writes to a disjoint
+ * region of the output array.
+ */
+void matmul_thread_func(void* arg) {
+    MatmulThreadArg* args = (MatmulThreadArg*)arg;
+    
+    for (int i = args->start_i; i < args->end_i; i++) {
+        float val = 0.0f;
+        for (int j = 0; j < args->n; j++) {
+            val += args->w[i * args->n + j] * args->x[j];
+        }
+        args->xout[i] = val;
+    }
+    
+    thread_exit();
+}
+
+/**
+ * @brief Thread function for parallel attention head computation.
+ * 
+ * @param arg AttentionThreadArg structure containing work range
+ * 
+ * @details
+ * Each thread processes a contiguous block of attention heads. For each head:
+ * 1. Computes attention scores against all previous positions
+ * 2. Applies softmax to get attention weights
+ * 3. Computes weighted sum of values
+ * 
+ * Thread safety:
+ * - Each head writes to separate regions of s->att and s->xb
+ * - Key/value cache is read-only in this phase
+ * - No synchronization needed between heads
+ */
+void attention_thread_func(void* arg) {
+    AttentionThreadArg* args = (AttentionThreadArg*)arg;
+    Transformer* transformer = args->transformer;
+    Config* p = &transformer->config;
+    RunState* s = &transformer->state;
+    
+    for (int h = args->start_head; h < args->end_head; h++) {
+        // get the query vector for this head
+        float* q = s->q + h * args->head_size;
+        // attention scores for this head
+        float* att = s->att + h * p->seq_len;
+        
+        // iterate over all timesteps, including the current one
+        for (int t = 0; t <= args->pos; t++) {
+            // get the key vector for this head and at this timestep
+            float* k = s->key_cache + args->loff + t * args->kv_dim + (h / args->kv_mul) * args->head_size;
+            // calculate the attention score as the dot product of q and k
+            float score = 0.0f;
+            for (int i = 0; i < args->head_size; i++) {
+                score += q[i] * k[i];
+            }
+            score /= sqrtf(args->head_size);
+            // save the score to the attention buffer
+            att[t] = score;
+        }
+
+        // softmax the scores to get attention weights, from 0..pos inclusively
+        softmax(att, args->pos + 1);
+
+        // weighted sum of the values, store back into xb
+        float* xb = s->xb + h * args->head_size;
+        memset(xb, 0, args->head_size * sizeof(float));
+        for (int t = 0; t <= args->pos; t++) {
+            // get the value vector for this head and at this timestep
+            float* v = s->value_cache + args->loff + t * args->kv_dim + (h / args->kv_mul) * args->head_size;
+            // get the attention weight for this timestep
+            float a = att[t];
+            // accumulate the weighted value into xb
+            for (int i = 0; i < args->head_size; i++) {
+                xb[i] += a * v[i];
+            }
+        }
+    }
+    
+    thread_exit();
 }
 
 float* forward(Transformer* transformer, int token, int pos) {
@@ -465,44 +653,46 @@ float* forward(Transformer* transformer, int token, int pos) {
       }
     }
 
-    // multihead attention. iterate over all heads
-    int h;
-    // #pragma omp parallel for private(h)
-    for (h = 0; h < p->n_heads; h++) {
-      // get the query vector for this head
-      float* q = s->q + h * head_size;
-      // attention scores for this head
-      float* att = s->att + h * p->seq_len;
-      // iterate over all timesteps, including the current one
-      for (int t = 0; t <= pos; t++) {
-        // get the key vector for this head and at this timestep
-        float* k = s->key_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
-        // calculate the attention score as the dot product of q and k
-        float score = 0.0f;
-        for (int i = 0; i < head_size; i++) {
-          score += q[i] * k[i];
+        // multihead attention. iterate over all heads - PARALLELIZED
+    int num_threads = NUM_THREADS;
+    if (p->n_heads < num_threads) {
+        num_threads = p->n_heads;  // Don't create more threads than heads
+    }
+    
+    int thread_ids[num_threads];
+    AttentionThreadArg att_args[num_threads];
+    
+    // Calculate chunk size for attention heads
+    int heads_per_thread = (p->n_heads + num_threads - 1) / num_threads;
+    
+    // Create threads for attention heads
+    for (int t = 0; t < num_threads; t++) {
+        int start_head = t * heads_per_thread;
+        int end_head = (t + 1) * heads_per_thread;
+        if (end_head > p->n_heads) end_head = p->n_heads;
+        
+        if (start_head < p->n_heads) {
+            att_args[t].transformer = transformer;
+            att_args[t].layer = l;
+            att_args[t].start_head = start_head;
+            att_args[t].end_head = end_head;
+            att_args[t].pos = pos;
+            att_args[t].head_size = head_size;
+            att_args[t].kv_dim = kv_dim;
+            att_args[t].kv_mul = kv_mul;
+            att_args[t].loff = loff;
+            
+            thread_ids[t] = thread_create(attention_thread_func, &att_args[t]);
+        } else {
+            thread_ids[t] = -1;  // No work for this thread
         }
-        score /= sqrtf(head_size);
-        // save the score to the attention buffer
-        att[t] = score;
-      }
-
-      // softmax the scores to get attention weights, from 0..pos inclusively
-      softmax(att, pos + 1);
-
-      // weighted sum of the values, store back into xb
-      float* xb = s->xb + h * head_size;
-      memset(xb, 0, head_size * sizeof(float));
-      for (int t = 0; t <= pos; t++) {
-        // get the value vector for this head and at this timestep
-        float* v = s->value_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
-        // get the attention weight for this timestep
-        float a = att[t];
-        // accumulate the weighted value into xb
-        for (int i = 0; i < head_size; i++) {
-          xb[i] += a * v[i];
+    }
+    
+    // Wait for all attention threads to complete
+    for (int t = 0; t < num_threads; t++) {
+        if (thread_ids[t] != -1) {
+            thread_join(thread_ids[t]);
         }
-      }
     }
 
     // final matmul to get the output of the attention
