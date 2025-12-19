@@ -13,3 +13,5 @@
 #define MAXPATH      128   // maximum file path name
 #define USERSTACK    1     // user stack pages
 
+/** @brief Maximum number of shared memory segments in the system. */
+#define NSHM         16

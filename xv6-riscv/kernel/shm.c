@@ -291,6 +291,29 @@ void* shm_attach(int shmid, void *uaddr, int flags) {
     }
   }
 
+  // record the attachment in the process local table
+  acquire(&p->lock);
+  int slot = -1;
+  for (int i = 0; i < NSHM; i++) {
+    if (p->shm_attached[i].shmid == -1) {
+      slot = i;
+      break;
+    }
+  }
+  if (slot == -1) {
+    // no room to track this attachment; undo mappings and fail
+    for (uint64 j = 0; j < seg->npages; j++) {
+      uvmunmap(p->pagetable, va + j * PGSIZE, 1, 0);
+    }
+    release(&p->lock);
+    release(&shm_table.lock);
+    return (void*)-1;
+  }
+
+  p->shm_attached[slot].shmid = seg->id;
+  p->shm_attached[slot].va = va;
+  release(&p->lock);
+
   release(&shm_table.lock);
   return (void*)va;  // Return the mapped virtual address
 }
@@ -316,32 +339,37 @@ int shm_detach(void *shmaddr) {
   if (va % PGSIZE != 0 || va >= MAXVA)
     return -1;
 
-  acquire(&shm_table.lock);
-
-  // Find the segment by checking if this VA's PA matches any of the segment's physical pages
-  seg = 0;
+  // Find the attachment slot in the process-local table
+  acquire(&p->lock);
+  int slot = -1;
   for (int i = 0; i < NSHM; i++) {
-    struct shm_segment *s = &shm_table.segs[i];
-    if (s->id != -1) {
-      uint64 pa = walkaddr(p->pagetable, va);
-      if (pa != 0) {
-        for (uint64 j = 0; j < s->npages; j++) {
-          if (pa == s->phys_pages[j]) {
-            seg = s;
-            break;
-          }
-        }
-      }
-      if (seg) break;
+    if (p->shm_attached[i].shmid != -1 && p->shm_attached[i].va == va) {
+      slot = i;
+      break;
     }
   }
+  if (slot == -1) {
+    release(&p->lock);
+    return -1; // not found
+  }
 
-  if (seg == 0) {
+  int shmid = p->shm_attached[slot].shmid;
+  // mark slot freed
+  p->shm_attached[slot].shmid = -1;
+  p->shm_attached[slot].va = 0;
+  release(&p->lock);
+
+  acquire(&shm_table.lock);
+  seg = 0;
+  if (shmid >= 0 && shmid < NSHM) {
+    seg = &shm_table.segs[shmid];
+  }
+  if (seg == 0 || seg->id == -1) {
     release(&shm_table.lock);
     return -1;
   }
 
-  // Unmap the entire segment from process address space
+  // Unmap the entire segment from this process's address space
   uvmunmap(p->pagetable, va, seg->npages, 0);
 
   acquire(&seg->lock);
@@ -444,36 +472,40 @@ int shmctl(int shmid, int cmd, void *buf) {
  * even when processes exit abnormally.
  */
 void shm_cleanup_proc(struct proc *p) {
-  acquire(&shm_table.lock);
-
+  // Iterate over the per-process attachment list and detach each mapped segment
   for (int i = 0; i < NSHM; i++) {
-    struct shm_segment *seg = &shm_table.segs[i];
+    int shmid = p->shm_attached[i].shmid;
+    uint64 va = p->shm_attached[i].va;
+    if (shmid == -1) continue;
 
-    if (seg->id != -1)  // Use ID instead of name[0] to check if segment exists
+    // Clear the per-process slot first
+    p->shm_attached[i].shmid = -1;
+    p->shm_attached[i].va = 0;
+
+    // Unmap and update global segment refcount
+    acquire(&shm_table.lock);
+    if (shmid < 0 || shmid >= NSHM || shm_table.segs[shmid].id == -1) {
+      release(&shm_table.lock);
       continue;
+    }
+    struct shm_segment *seg = &shm_table.segs[shmid];
+
+    // Unmap the pages from this process
+    uvmunmap(p->pagetable, va, seg->npages, 0);
 
     acquire(&seg->lock);
-
-    if (seg->refcount > 0) {
-      uint64 va = 0x60000000;
-      uvmunmap(p->pagetable, va, seg->npages, 0);
-
-      seg->refcount--;
-
-      if (seg->refcount == 0 && !seg->persistent) {
-        for (uint64 i = 0; i < seg->npages; i++) {
-          kfree((void*)seg->phys_pages[i]);
-          seg->phys_pages[i] = 0;
-        }
-        seg->name[0] = '\0';
-        seg->size = 0;
-        seg->npages = 0;
-        seg->id = -1;
+    seg->refcount--;
+    if (seg->refcount == 0 && !seg->persistent) {
+      for (uint64 k = 0; k < seg->npages; k++) {
+        kfree((void*)seg->phys_pages[k]);
+        seg->phys_pages[k] = 0;
       }
+      seg->name[0] = '\0';
+      seg->size = 0;
+      seg->npages = 0;
+      seg->id = -1;
     }
-
     release(&seg->lock);
+    release(&shm_table.lock);
   }
-
-  release(&shm_table.lock);
 }

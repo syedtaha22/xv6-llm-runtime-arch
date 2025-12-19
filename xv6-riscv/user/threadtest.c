@@ -413,6 +413,77 @@ int test_thread_shm_access() {
   return ok;
 }
 
+/**
+ * @brief Measure cost of thread operations using shared memory.
+ * Runs a short workload across multiple iterations and records timing
+ * breakdowns for create, join, and estimated exit costs.
+ *
+ * @param iterations Number of measurement iterations to perform.
+ * @param results Pointer to a {@link timing_results} to populate.
+ * @return 1 on success, 0 on failure (e.g., unable to create thread).
+ */
+int measure_shm_thread_operations(int iterations, struct timing_results* results) {
+  long long total_create = 0, total_join = 0, total_lifecycle = 0;
+
+  // allocate a SHM segment for the threads to use
+  const char *name = "threadtest_shm_timing";
+  int shmid = shmget(name, 4096, IPC_CREAT | SHM_PERSIST);
+  if (shmid < 0) {
+    failnoex(" shmget failed");
+    return 0;
+  }
+
+  void *shmaddr = shmat(shmid, 0, SHM_RDWR);
+  if (shmaddr == (void*)-1) {
+    failnoex(" shmat failed");
+    shmctl(shmid, IPC_RMID, 0);
+    return 0;
+  }
+
+  int* shared = (int*)shmaddr;
+
+  info(" Measuring thread operations (%d iterations)...", iterations);
+
+  for (int i = 0; i < iterations; i++) {
+    // Measure full lifecycle with timing breakdown
+    long long t0 = perf_time_in_ms();
+    int tid = thread_create(work_thread, shared);
+    long long t1 = perf_time_in_ms();
+
+    if (tid < 0) {
+      fail(" ERROR: Failed to create thread");
+      
+      if (shmdt(shmaddr) < 0) failnoex(" shmdt failed");
+      if (shmctl(shmid, IPC_RMID, 0) < 0) failnoex(" shmctl IPC_RMID failed");
+
+      return 0;
+    }
+
+    thread_join(tid);
+    long long t2 = perf_time_in_ms();
+
+    total_create += (t1 - t0);
+    total_join += (t2 - t1);
+    total_lifecycle += (t2 - t0);
+  }
+
+  results->create_time = total_create;
+  results->join_time = total_join;
+  results->total_time = total_lifecycle;
+  results->exit_time = total_lifecycle - total_create - total_join;
+
+  info(" Work completed: %d (expected %d)", *shared, iterations * 1000);
+  info("   thread_create: %lld ms total, %.3f ms avg", results->create_time, results->create_time / (float)iterations);
+  info("   thread_join:   %lld ms total, %.3f ms avg", results->join_time, results->join_time / (float)iterations);
+  info("   thread_exit:   %lld ms total, %.3f ms avg (est.)", results->exit_time, results->exit_time / (float)iterations);
+  info("   full lifecycle: %lld ms total, %.3f ms avg\n", results->total_time, results->total_time / (float)iterations);
+
+  // cleanup
+  if (shmdt(shmaddr) < 0) failnoex(" shmdt failed");
+  if (shmctl(shmid, IPC_RMID, 0) < 0) failnoex(" shmctl IPC_RMID failed");
+
+  return 1;
+}
 
 /**
  * @brief Program entry point for the THREADTEST suite.
@@ -469,11 +540,15 @@ int main(void) {
   total_tests += 4; // 2, 3, 4, 5 threads
   passed_tests += test_parallel_speedup(500000000, 5);
 
-
   // 5. Thread access to shared memory (reproducer for thread mapping bug)
   info("=== Thread access to shared memory test ===");
   total_tests++;
   passed_tests += test_thread_shm_access();
+
+  // 6. Thread operation timing
+  info("=== Thread Operation Timing (on SHM) ===");
+  total_tests++;
+  passed_tests += measure_shm_thread_operations(100, &timing);
 
   return summary(passed_tests, total_tests);
 }

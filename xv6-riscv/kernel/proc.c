@@ -127,6 +127,12 @@ found:
   p->pid = allocpid();
   p->state = USED;
 
+  // initialize per-process shared memory attachment slots
+  for (int i = 0; i < NSHM; i++) {
+    p->shm_attached[i].shmid = -1;
+    p->shm_attached[i].va = 0;
+  }
+
   // Allocate a trapframe page.
   if ((p->trapframe = (struct trapframe *)kalloc()) == 0)
   {
@@ -264,6 +270,18 @@ int thread_create(uint64 start_routine, uint64 arg) {
     release(&np->lock);
     return -1;
   }
+
+  // Fast-share any shared-memory (SHM) mappings recorded on the parent
+  // into the new thread's pagetable to ensure threads can access parent
+  // SHM without triggering page faults on access.
+  if (uvmshare_shm(main_proc, np) < 0) {
+    // If SHM propagation fails, clean up and abort thread creation.
+    proc_freepagetable(np->pagetable, 0);
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
+
 
   // Allocate a new user stack page at a page-aligned address at the
   // top of the address space and map it into the new thread's pagetable.
