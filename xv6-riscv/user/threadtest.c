@@ -338,6 +338,81 @@ int test_parallel_speedup(int target, int max_threads) {
   return passes;
 }
 
+/*
+ * @brief Worker thread that tries to access and modify a shared memory integer.
+ * The argument is expected to be the address returned by shmat().
+ * 
+ * @param arg Pointer to the shared memory integer.
+ */
+void thread_shm_worker(void* arg) {
+  int *p = (int*)arg;
+  if (p == 0) {
+    failnoex("thread_shm_worker: received NULL arg\n");
+    thread_exit();
+  }
+
+  // attempt to read and increment the integer in shared memory
+  int before = *p;
+  printf("  thread_shm_worker: read %d at %p\n", before, p);
+  *p = before + 1;
+  printf("  thread_shm_worker: wrote %d at %p\n", *p, p);
+
+  thread_exit();
+}
+
+
+/*
+ * Test if a thread can access shared memory mapped in the parent process.
+ * This intentionally reproduces the failure mode where a thread's pagetable
+ * does not include mappings created after the group's size (`main_proc->sz`)
+ * and thus faults on access.
+ * 
+ * @return 1 if the test passed, 0 otherwise.
+ */
+int test_thread_shm_access() {
+  const char *name = "threadtest_shm";
+  int shmid = shmget(name, 4096, IPC_CREAT | SHM_PERSIST);
+  if (shmid < 0) {
+    failnoex(" shmget failed");
+    return 0;
+  }
+
+  void *shmaddr = shmat(shmid, 0, SHM_RDWR);
+  if (shmaddr == (void*)-1) {
+    failnoex(" shmat failed");
+    return 0;
+  }
+
+  int *shared = (int*)shmaddr;
+  *shared = 1234;
+  printf(" parent: wrote %d at %p (shmid=%d)\n", *shared, shared, shmid);
+
+  int tid = thread_create(thread_shm_worker, shared);
+  if (tid < 0) {
+    failnoex(" thread_create failed");
+    shmdt(shmaddr);
+    shmctl(shmid, IPC_RMID, 0);
+    return 0;
+  }
+
+  thread_join(tid);
+
+  printf(" parent: read back %d at %p\n", *shared, shared);
+  int ok = 0;
+  if (*shared == 1235) {
+    pass(" thread could access and modify shared memory");
+    ok = 1;
+  } else {
+    failnoex(" thread could not access shared memory (val=%d)", *shared);
+  }
+
+  if (shmdt(shmaddr) < 0) failnoex(" shmdt failed");
+  if (shmctl(shmid, IPC_RMID, 0) < 0) failnoex(" shmctl IPC_RMID failed");
+
+  printf("\n");
+  return ok;
+}
+
 
 /**
  * @brief Program entry point for the THREADTEST suite.
@@ -393,6 +468,12 @@ int main(void) {
   // 4. Parallel computation
   total_tests += 4; // 2, 3, 4, 5 threads
   passed_tests += test_parallel_speedup(500000000, 5);
+
+
+  // 5. Thread access to shared memory (reproducer for thread mapping bug)
+  info("=== Thread access to shared memory test ===");
+  total_tests++;
+  passed_tests += test_thread_shm_access();
 
   return summary(passed_tests, total_tests);
 }
