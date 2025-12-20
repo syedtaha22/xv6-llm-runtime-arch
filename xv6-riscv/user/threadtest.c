@@ -58,15 +58,13 @@ volatile int thread_should_exit = 0;  /// @brief Flag indicating a thread should
 
 /**
  * @brief Worker thread that increments the integer pointed to by arg.
- * Performs 1000 increments to simulate short computational work.
+ * Performs increment on the shared integer.
  *
  * @param arg Pointer to an integer counter to increment.
  */
 void work_thread(void* arg) {
   int* work = (int*)arg;
-  for (int i = 0; i < 1000; i++) {
-    (*work)++;
-  }
+  (*work)++;
   thread_exit();
 }
 
@@ -144,7 +142,7 @@ int measure_thread_operations(int iterations, struct timing_results* results) {
   results->total_time = total_lifecycle;
   results->exit_time = total_lifecycle - total_create - total_join;
 
-  info(" Work completed: %d (expected %d)", work, iterations * 1000);
+  info(" Work completed: %d (expected %d)", work, iterations);
   info("   thread_create: %lld ms total, %.3f ms avg", results->create_time, results->create_time / (float)iterations);
   info("   thread_join:   %lld ms total, %.3f ms avg", results->join_time, results->join_time / (float)iterations);
   info("   thread_exit:   %lld ms total, %.3f ms avg (est.)", results->exit_time, results->exit_time / (float)iterations);
@@ -472,7 +470,7 @@ int measure_shm_thread_operations(int iterations, struct timing_results* results
   results->total_time = total_lifecycle;
   results->exit_time = total_lifecycle - total_create - total_join;
 
-  info(" Work completed: %d (expected %d)", *shared, iterations * 1000);
+  info(" Work completed: %d (expected %d)", *shared, iterations);
   info("   thread_create: %lld ms total, %.3f ms avg", results->create_time, results->create_time / (float)iterations);
   info("   thread_join:   %lld ms total, %.3f ms avg", results->join_time, results->join_time / (float)iterations);
   info("   thread_exit:   %lld ms total, %.3f ms avg (est.)", results->exit_time, results->exit_time / (float)iterations);

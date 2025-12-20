@@ -118,10 +118,13 @@ void update_peak_ram(void) {
 #undef floorf
 #define floorf xfloorf
 
+void shutdown_thread_pool(void);
+
 /**
  * @brief Print performance metrics.
  */
 void release_and_exit(int code) {
+  shutdown_thread_pool();
   // clean up any global state here if needed
   shmdt(GLOBAL_WEIGHTS_PTR);
   shmdt(GLOBAL_TOKENIZER_PTR);
@@ -192,6 +195,216 @@ void* fetch_if_not_cached(const char* segment_name, int expected_size, char* (*f
 
   pass(" %s fetched and cached in shared memory (ID: %d).\n", segment_name, shmid);
   return shmaddr;
+}
+
+
+// ----------------------------------------------------------------------------
+// Thread Pool for Parallel Matrix Multiplication
+
+int g_num_threads = 3; // default number of matmul worker threads
+
+typedef struct {
+    float* xout;
+    float* x;
+    float* w;
+    int n;
+    int d;
+    int start_row;
+    int end_row;
+    volatile int* work_ready;
+    volatile int* work_done;
+} MatmulWork; 
+
+typedef struct {
+    int thread_id;
+    MatmulWork* work;
+    volatile int* should_exit;
+} ThreadPoolWorker;
+
+// Global thread pool state
+static int thread_pool_initialized = 0;
+static int* thread_ids = NULL;
+static MatmulWork* work_items = NULL;
+static volatile int* work_ready = NULL;
+static volatile int* work_done = NULL;
+static ThreadPoolWorker** worker_ptrs = NULL; // hold allocated worker structs so we can free them
+static volatile int thread_pool_exit = 0; 
+
+/**
+ * @brief Worker thread function for parallel matmul
+ * 
+ * This thread stays alive and processes work items repeatedly,
+ * eliminating thread creation/destruction overhead.
+ */
+void matmul_worker_thread(void* arg) {
+    ThreadPoolWorker* worker = (ThreadPoolWorker*)arg;
+    MatmulWork* work = worker->work;
+    
+    while (1) {
+        // Wait for work
+        while (!(*work->work_ready) && !(*worker->should_exit)) {
+            // Busy-wait with occasional yield
+            // In a real system, you'd use a condition variable
+            yield(); // Yield to allow other threads to run
+        }
+        
+        if (*worker->should_exit) {
+            thread_exit();
+        }
+        
+        // Process work
+        for (int i = work->start_row; i < work->end_row; i++) {
+            float val = 0.0f;
+            float* w_row = &work->w[i * work->n];
+            
+            // Inner loop optimization: better cache locality
+            for (int j = 0; j < work->n; j++) {
+                val += w_row[j] * work->x[j];
+            }
+            work->xout[i] = val;
+        }
+        
+        // Signal completion
+        *work->work_done = 1;
+        *work->work_ready = 0;
+    }
+}
+
+/**
+ * @brief Initialize the thread pool (called once at startup)
+ */
+void init_thread_pool(void) {
+    if (thread_pool_initialized) return;
+    thread_pool_exit = 0;
+
+    int n = g_num_threads;
+    thread_ids = malloc(sizeof(int) * n);
+    work_items = malloc(sizeof(MatmulWork) * n);
+    work_ready = malloc(sizeof(volatile int) * n);
+    work_done = malloc(sizeof(volatile int) * n);
+    worker_ptrs = malloc(sizeof(ThreadPoolWorker*) * n);
+    if (!thread_ids || !work_items || !work_ready || !work_done || !worker_ptrs) {
+        eprintf("thread pool malloc failed\n");
+        release_and_exit(EXIT_FAILURE);
+    }
+
+    for (int t = 0; t < n; t++) {
+        work_ready[t] = 0;
+        work_done[t] = 0;
+
+        ThreadPoolWorker* worker = malloc(sizeof(ThreadPoolWorker));
+        if (!worker) {
+            eprintf("worker malloc failed\n");
+            release_and_exit(EXIT_FAILURE);
+        }
+        worker->thread_id = t;
+        worker->work = &work_items[t];
+        worker->should_exit = &thread_pool_exit;
+        worker_ptrs[t] = worker;
+
+        work_items[t].work_ready = &work_ready[t];
+        work_items[t].work_done = &work_done[t];
+
+        thread_ids[t] = thread_create(matmul_worker_thread, worker);
+
+        if (thread_ids[t] < 0) {
+            eprintf("Failed to create worker thread %d\n", t);
+            release_and_exit(EXIT_FAILURE);
+        }
+    }
+
+    thread_pool_initialized = 1;
+} 
+
+/**
+ * @brief Shutdown the thread pool (called at program exit)
+ */
+void shutdown_thread_pool(void) {
+    if (!thread_pool_initialized) return;
+
+    thread_pool_exit = 1;
+
+    for (int t = 0; t < g_num_threads; t++) {
+        if (thread_ids && thread_ids[t] > 0) thread_join(thread_ids[t]);
+    }
+
+    // free worker structs
+    for (int t = 0; t < g_num_threads; t++) {
+        if (worker_ptrs && worker_ptrs[t]) free(worker_ptrs[t]);
+    }
+    free(worker_ptrs); worker_ptrs = NULL;
+
+    free(thread_ids); thread_ids = NULL;
+    free(work_items); work_items = NULL;
+    free((void*)work_ready); work_ready = NULL;
+    free((void*)work_done); work_done = NULL;
+
+    thread_pool_initialized = 0;
+} 
+
+/**
+ * @brief Optimized parallel matrix multiplication
+ * 
+ * Key optimizations:
+ * - Reuses pre-created thread pool
+ * - Distributes work in cache-friendly chunks
+ * - Minimizes synchronization overhead
+ * - Better load balancing
+ */
+void matmul(float* xout, float* x, float* w, int n, int d) {
+    perf_start_function("matmul");
+    
+    // For small matrices, single-threaded is faster due to overhead
+    if (d < 128) {
+        for (int i = 0; i < d; i++) {
+            float val = 0.0f;
+            float* w_row = &w[i * n];
+            for (int j = 0; j < n; j++) {
+                val += w_row[j] * x[j];
+            }
+            xout[i] = val;
+        }
+        perf_end_function("matmul");
+        return;
+    }
+  
+    
+    // Calculate work distribution
+    // Use larger chunks for better cache locality
+    int chunk_size = (d + g_num_threads - 1) / g_num_threads;
+    int num_active_threads = (d + chunk_size - 1) / chunk_size;
+    if (num_active_threads > g_num_threads) {
+        num_active_threads = g_num_threads;
+    }
+    
+    // Distribute work to threads
+    for (int t = 0; t < num_active_threads; t++) {
+        int start_row = t * chunk_size;
+        int end_row = start_row + chunk_size;
+        if (end_row > d) end_row = d;
+        
+        if (start_row >= d) break;
+        
+        work_items[t].xout = xout;
+        work_items[t].x = x;
+        work_items[t].w = w;
+        work_items[t].n = n;
+        work_items[t].d = d;
+        work_items[t].start_row = start_row;
+        work_items[t].end_row = end_row;
+        work_done[t] = 0;
+        work_ready[t] = 1;  // Signal work is ready
+    }
+    
+    // Wait for all threads to complete
+    for (int t = 0; t < num_active_threads; t++) {
+        while (!work_done[t]) {
+            // Busy-wait for completion
+            // Could add a yield here if your system supports it
+        }
+    }
+    
+    perf_end_function("matmul");
 }
 
 
@@ -398,21 +611,21 @@ void softmax(float* x, int size) {
   perf_end_function("softmax");
 }
 
-void matmul(float* xout, float* x, float* w, int n, int d) {
-  perf_start_function("matmul");
-  // W (d,n) @ x (n,) -> xout (d,)
-  // by far the most amount of time is spent inside this little function
-  int i;
-  // #pragma omp parallel for private(i)
-  for (i = 0; i < d; i++) {
-    float val = 0.0f;
-    for (int j = 0; j < n; j++) {
-      val += w[i * n + j] * x[j];
-    }
-    xout[i] = val;
-  }
-  perf_end_function("matmul");
-}
+// void matmul(float* xout, float* x, float* w, int n, int d) {
+//   perf_start_function("matmul");
+//   // W (d,n) @ x (n,) -> xout (d,)
+//   // by far the most amount of time is spent inside this little function
+//   int i;
+//   // #pragma omp parallel for private(i)
+//   for (i = 0; i < d; i++) {
+//     float val = 0.0f;
+//     for (int j = 0; j < n; j++) {
+//       val += w[i * n + j] * x[j];
+//     }
+//     xout[i] = val;
+//   }
+//   perf_end_function("matmul");
+// }
 
 float* forward(Transformer* transformer, int token, int pos) {
   perf_start_function("forward");
@@ -1185,6 +1398,7 @@ void error_usage() {
   eprintf("  -i <string> input prompt\n");
   eprintf("  -m <string> mode: generate|chat, default: generate\n");
   eprintf("  -y <string> (optional) system prompt in chat mode\n");
+  eprintf("  -x <int>    number of matmul worker threads (default: 3)\n");
   exit(EXIT_FAILURE);
 }
 
@@ -1211,7 +1425,8 @@ typedef struct {
   unsigned long long rng_seed;
   char* mode;
   char* system_prompt;
-} Args;
+  int num_threads; // -x flag: number of matmul worker threads
+} Args; 
 
 /**
  * @brief Parse command-line arguments and populate the Args structure.
@@ -1239,6 +1454,8 @@ int argparse(int argc, char* argv[], Args* args) {
   args->rng_seed = 0;            // seed rng with time by default
   args->mode = "generate";       // generate|chat
   args->system_prompt = NULL;    // the (optional) system prompt to use in chat mode
+  args->num_threads = 3;         // default number of matmul worker threads
+
 
   for (int i = 1; i < argc; i += 2) {
     // do some basic validation
@@ -1253,6 +1470,7 @@ int argparse(int argc, char* argv[], Args* args) {
     else if (argv[i][1] == 'i') { args->prompt = argv[i + 1]; }
     else if (argv[i][1] == 'm') { args->mode = argv[i + 1]; }
     else if (argv[i][1] == 'y') { args->system_prompt = argv[i + 1]; }
+    else if (argv[i][1] == 'x') { args->num_threads = atoi(argv[i + 1]); }
     else { return -1; }
   }
 
@@ -1260,6 +1478,9 @@ int argparse(int argc, char* argv[], Args* args) {
   if (args->temperature < 0.0f) args->temperature = 0.0f;
   if (args->topp < 0.0f || args->topp > 1.0f) args->topp = 0.9f;
   if (args->steps < 0) args->steps = 0;
+  if (args->num_threads <= 0) args->num_threads = 1;
+  // cap to reasonable upper bound to avoid excessive allocations in xv6
+  if (args->num_threads > 16) args->num_threads = 16; 
 
   return 0;
 }
@@ -1285,6 +1506,9 @@ int main(int argc, char* argv[]) {
   Args args;
 
   if (argparse(argc, argv, &args) != 0) error_usage();
+
+  // apply user-configured thread count for matmul worker pool
+  g_num_threads = args.num_threads; 
 
   // Initialize performance metrics
   perf_metrics.start_time_ms = perf_time_in_ms();
@@ -1320,7 +1544,10 @@ int main(int argc, char* argv[]) {
   Sampler sampler;
   build_sampler(&sampler, transformer.config.vocab_size, args.temperature, args.topp, args.rng_seed);
 
+
   update_peak_ram();
+
+  init_thread_pool();
 
   // run!
   if (strcmp(args.mode, "generate") == 0) {
