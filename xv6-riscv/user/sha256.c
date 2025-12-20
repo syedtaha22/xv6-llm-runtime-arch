@@ -35,8 +35,14 @@
 // Σ-functions — mixes bits by rotating and shifting
 #define SIG0(x) (ROTRIGHT(x,7)  ^ ROTRIGHT(x,18) ^ ((x) >> 3))
 #define SIG1(x) (ROTRIGHT(x,17) ^ ROTRIGHT(x,19) ^ ((x) >> 10))
-#define STEP1(e, f, g) (ROTRIGHT(e, 6) ^ ROTRIGHT(e, 11) ^ ROTRIGHT(e, 25)) + ((e & f) ^ ((~e) & g))
-#define STEP2(a, b, c) (ROTRIGHT(a, 2) ^ ROTRIGHT(a, 13) ^ ROTRIGHT(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))
+
+static uint32 STEP1(uint32 e, uint32 f, uint32 g) {
+  return (ROTRIGHT(e, 6) ^ ROTRIGHT(e, 11) ^ ROTRIGHT(e, 25)) + ((e & f) ^ ((~e) & g));
+}
+
+static uint32 STEP2(uint32 a, uint32 b, uint32 c) {
+  return (ROTRIGHT(a, 2) ^ ROTRIGHT(a, 13) ^ ROTRIGHT(a, 22)) + ((a & b) ^ (a & c) ^ (b & c));
+}
 
 /**
  * @brief Update the message schedule array for SHA-256 block processing.

@@ -387,6 +387,9 @@ qemu-gdb: $K/kernel .gdbinit fs.img
 	@echo "*** Now run 'gdb' in another window." 1>&2
 	$(QEMU) $(QEMUOPTS) -S $(QEMUGDB)
 
+qemu-nox: check-qemu-version newfs.img $K/kernel fs.img
+	$(QEMU) $(QEMUOPTS) -nographic
+
 ifeq ($(LAB),net)
 # try to generate a unique port for the echo server
 SERVERPORT = $(shell expr `id -u` % 5000 + 25099)
