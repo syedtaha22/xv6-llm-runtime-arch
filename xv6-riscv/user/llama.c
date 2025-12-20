@@ -1379,10 +1379,6 @@ void chat(Transformer* transformer, Tokenizer* tokenizer, Sampler* sampler,
   perf_end_function("chat");
 }
 
-void print_performance_metrics() {
-  perf_print_report();
-}
-
 // ----------------------------------------------------------------------------
 // CLI, include only if not testing
 #ifndef TESTING
@@ -1568,7 +1564,7 @@ int main(int argc, char* argv[]) {
 
   perf_metrics.end_time_ms = perf_time_in_ms();
   update_peak_ram();
-  print_performance_metrics();
+  perf_print_report();
 
   release_and_exit(EXIT_SUCCESS);
 
