@@ -350,17 +350,15 @@ int thread_create(uint64 start_routine, uint64 arg) {
   np->state = RUNNABLE;
   release(&np->lock);
 
-  // Propagate new size to other threads in the group (iterate thread list).
+  // Propagate new size to other threads in the group.
   struct proc *t;
-  acquire(&main_proc->lock);
-  for(t = main_proc->thread_head; t; t = t->thread_next){
-    if(t != np && t->state != UNUSED){
+  for(t = proc; t < &proc[NPROC]; t++){
+    if(t->is_thread && t->thread_group == main_proc && t != np && t->state != UNUSED){
       acquire(&t->lock);
       t->sz = main_proc->sz;
       release(&t->lock);
     }
   }
-  release(&main_proc->lock);
 
   return np->tid;
 }
@@ -369,36 +367,39 @@ int thread_create(uint64 start_routine, uint64 arg) {
 int
 thread_join(int thread_id)
 {
+  int havekids;
   struct proc *p = myproc();
   struct proc *main_proc = p->is_thread ? p->thread_group : p;
-  struct proc *t;
 
-  // Find the thread in the leader's thread list
-  acquire(&main_proc->lock);
-  for(t = main_proc->thread_head; t; t = t->thread_next){
-    if(t->tid == thread_id){
-      // Found the target thread; wait on its per-thread channel.
-      acquire(&t->lock);
-      release(&main_proc->lock);
+  acquire(&wait_lock);
 
-      while(t->state != ZOMBIE){
-        if(killed(p)){
+  for(;;){
+    // Scan only the thread list for this group leader.
+    struct proc *t;
+    acquire(&main_proc->lock);
+    for(t = main_proc->thread_head; t; t = t->thread_next){
+      if(t->tid == thread_id){
+        acquire(&t->lock);
+        if(t->state == ZOMBIE){
+          freeproc(t);
           release(&t->lock);
-          return -1;
+          release(&wait_lock);
+          release(&main_proc->lock);
+          return 0;
         }
-        sleep(t, &t->lock);
+        release(&t->lock);
+        havekids = 1;
       }
-
-      // Thread is ZOMBIE; reclaim it while holding its lock.
-      freeproc(t);
-      release(&t->lock);
-      return 0;
     }
-  }
-  release(&main_proc->lock);
+    release(&main_proc->lock);
 
-  // No such thread in this group
-  return -1;
+    if(!havekids || killed(p)){
+      release(&wait_lock);
+      return -1;
+    }
+
+    sleep(main_proc, &wait_lock);
+  }
 }
 
 // Exit current thread. Does not free shared user pages; marks thread
@@ -418,19 +419,16 @@ thread_exit(void)
   // and should be handled by the main process when the whole process
   // exits. We only mark the thread ZOMBIE and wake joiners.
 
-  // Set ZOMBIE state under the thread lock, then wake any joiners.
-  // sched() must be called while holding p->lock (see contract in sched()).
+  acquire(&wait_lock);
+  // Wake any joiners waiting on the thread group leader.
+  wakeup(p->thread_group);
+
   acquire(&p->lock);
   p->xstate = 0;
   p->state = ZOMBIE;
+  release(&wait_lock);
 
-  // Wake joiners sleeping on this specific thread
-  wakeup(p);
-
-  // Call sched() while still holding p->lock (sched() expects this).
   sched();
-  // sched() should not return; if it does, release the lock and panic.
-  release(&p->lock);
   panic("zombie thread exit");
 }
 
