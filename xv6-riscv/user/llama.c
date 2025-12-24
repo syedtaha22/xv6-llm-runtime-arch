@@ -84,39 +84,6 @@ typedef uint32 size_t;
 void* GLOBAL_WEIGHTS_PTR = NULL; // global pointer to the model weights in shared memory
 void* GLOBAL_TOKENIZER_PTR = NULL; // global pointer to the tokenizer data in shared memory
 
-// ----------------------------------------------------------------------------
-// utilities: time
-
-long time_in_ms(void) {
-  return (long)(rdtime() / 100000); // 100 MHz = 100,000,000 cycles/sec
-}
-
-
-/**
- * @brief Update peak RAM usage if current usage is higher.
- */
-void update_peak_ram(void) {
-  perf_update_peak_ram();
-}
-
-/**
- * @brief Math function wrappers with call counting.
- */
- // Redefine math macros to use xmath functions directly
-#undef sqrtf
-#define sqrtf xsqrtf
-#undef expf
-#define expf xexpf
-#undef powf
-#define powf xpowf
-#undef cosf
-#define cosf xcosf
-#undef sinf
-#define sinf xsinf
-#undef abs
-#define abs xfabsf
-#undef floorf
-#define floorf xfloorf
 
 void shutdown_thread_pool(void);
 
@@ -201,8 +168,6 @@ void* fetch_if_not_cached(const char* segment_name, int expected_size, char* (*f
 // ----------------------------------------------------------------------------
 // Thread Pool for Parallel Matrix Multiplication
 
-int g_num_threads = 3; // default number of matmul worker threads
-
 typedef struct {
     float* xout;
     float* x;
@@ -229,6 +194,7 @@ static volatile int* work_ready = NULL;
 static volatile int* work_done = NULL;
 static ThreadPoolWorker** worker_ptrs = NULL; // hold allocated worker structs so we can free them
 static volatile int thread_pool_exit = 0; 
+static volatile int g_num_threads = 3; // default number of matmul worker threads
 
 /**
  * @brief Worker thread function for parallel matmul
@@ -1250,13 +1216,13 @@ void generate(Transformer* transformer, Tokenizer* tokenizer, Sampler* sampler, 
     }
 
     // init the timer here because the first iteration can be slower
-    if (start == 0) { start = time_in_ms(); }
+    if (start == 0) { start = perf_time_in_ms(); }
   }
   printf("\n");
 
   // report achieved tok/s (pos-1 because the timer starts after first iteration)
   if (pos > 1) {
-    long end = time_in_ms();
+    long end = perf_time_in_ms();
     eprintf("\nachieved tok/s: %f\n", (pos - 1) / (double)(end - start) * 1000);
     perf_metrics.total_tokens_generated = pos - 1;
     perf_metrics.total_inference_time_ms = end - start;
@@ -1531,7 +1497,7 @@ int main(int argc, char* argv[]) {
   build_transformer(&transformer, GLOBAL_WEIGHTS_PTR);
   build_tokenizer(&tokenizer, GLOBAL_TOKENIZER_PTR, transformer.config.vocab_size);
 
-  update_peak_ram();
+  perf_update_peak_ram();
 
   if (args.steps == 0 || args.steps > transformer.config.seq_len) 
     args.steps = transformer.config.seq_len; // override to ~max length
@@ -1541,7 +1507,7 @@ int main(int argc, char* argv[]) {
   build_sampler(&sampler, transformer.config.vocab_size, args.temperature, args.topp, args.rng_seed);
 
 
-  update_peak_ram();
+  perf_update_peak_ram();
 
   init_thread_pool();
 
@@ -1563,7 +1529,7 @@ int main(int argc, char* argv[]) {
   free_transformer(&transformer);
 
   perf_metrics.end_time_ms = perf_time_in_ms();
-  update_peak_ram();
+  perf_update_peak_ram();
   perf_print_report();
 
   release_and_exit(EXIT_SUCCESS);
