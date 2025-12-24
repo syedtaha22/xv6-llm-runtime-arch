@@ -316,6 +316,12 @@ void shutdown_thread_pool(void) {
  * - Distributes work in cache-friendly chunks
  * - Minimizes synchronization overhead
  * - Better load balancing
+ * 
+ * @param xout Output vector (d,)
+ * @param x Input vector (n,)
+ * @param w Weight matrix (d, n)
+ * @param n Number of columns in w
+ * @param d Number of rows in w
  */
 void matmul(float* xout, float* x, float* w, int n, int d) {
     perf_start_function("matmul");
