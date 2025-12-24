@@ -165,9 +165,29 @@ void* fetch_if_not_cached(const char* segment_name, int expected_size, char* (*f
 }
 
 
-// ----------------------------------------------------------------------------
+// ------------------------------------------------------------------------------
 // Thread Pool for Parallel Matrix Multiplication
+//
+// Make thread pool only once to prevent overhead of thread creation/destruction
+// ------------------------------------------------------------------------------
 
+/**
+ * @brief Structure representing a matrix multiplication work item.
+ * Each work item defines a portion of the matrix multiplication task
+ * to be processed by a worker thread.
+ * 
+ * @param xout Output vector pointer.
+ * @param x Input vector pointer.
+ * @param w Weight matrix pointer.
+ * @param n Number of columns in weight matrix / length of input vector.
+ * @param d Number of rows in weight matrix / length of output vector.
+ * @param start_row Starting row index for this work item.
+ * @param end_row Ending row index (exclusive) for this work item.
+ * @param work_ready Pointer to a flag indicating if work is ready.
+ * @param work_done Pointer to a flag indicating if work is done.
+ * 
+ * @author Hadiya Muneeb
+ */
 typedef struct {
     float* xout;
     float* x;
@@ -180,70 +200,118 @@ typedef struct {
     volatile int* work_done;
 } MatmulWork; 
 
+
+/**
+ * @brief Structure representing a thread pool worker.
+ * Each worker maintains its thread ID, associated work item,
+ * exit flag, and function pointer for the specific worker implementation.
+ * 
+ * @param thread_id Unique identifier for the thread.
+ * @param work Pointer to the MatmulWork assigned to this worker.
+ * @param should_exit Pointer to a flag indicating if the thread should exit.
+ * @param worker_fn Function pointer for the worker's processing function.
+ * 
+ * @author Hadiya Muneeb
+ */
 typedef struct {
     int thread_id;
     MatmulWork* work;
     volatile int* should_exit;
 } ThreadPoolWorker;
 
-// Global thread pool state
-static int thread_pool_initialized = 0;
-static int* thread_ids = NULL;
-static MatmulWork* work_items = NULL;
-static volatile int* work_ready = NULL;
-static volatile int* work_done = NULL;
-static ThreadPoolWorker** worker_ptrs = NULL; // hold allocated worker structs so we can free them
-static volatile int thread_pool_exit = 0; 
-static volatile int g_num_threads = 3; // default number of matmul worker threads
+// Global thread pool state. @todo encapsulate in a struct if needed.
+static int thread_pool_initialized = 0;       /// @brief Flag indicating if the thread pool is initialized
+static int* thread_ids = NULL;                /// @brief Array of thread IDs
+static MatmulWork* work_items = NULL;         /// @brief Array of work items
+static volatile int* work_ready = NULL;       /// @brief Array of work ready flags
+static volatile int* work_done = NULL;        /// @brief Array of work done flags
+static ThreadPoolWorker** worker_ptrs = NULL; /// @brief Array of pointers to ThreadPoolWorker structs
+static volatile int thread_pool_exit = 0;     /// @brief Flag to signal thread pool shutdown
+static volatile int g_num_threads = 3;        /// @brief Number of threads in the pool
+
+/**
+ * @brief Unrolled dot-product computation for better performance.
+ * Uses a loop unrolling factor of 8.
+ * 
+ * @author Hadiya Muneeb
+ * 
+ * @param w_row Pointer to the weight row.
+ * @param x Pointer to the input vector.
+ * @param n Length of the vectors.
+ * @return float Result of the dot product.
+ */
+static inline float dot_product_unrolled(float* w_row, float* x, int n) {
+    float sum0 = 0.0f, sum1 = 0.0f, sum2 = 0.0f, sum3 = 0.0f;
+    float sum4 = 0.0f, sum5 = 0.0f, sum6 = 0.0f, sum7 = 0.0f;
+    
+    int j = 0;
+    int n8 = n & ~7;
+    
+    for (; j < n8; j += 8) {
+        sum0 += w_row[j] * x[j];
+        sum1 += w_row[j + 1] * x[j + 1];
+        sum2 += w_row[j + 2] * x[j + 2];
+        sum3 += w_row[j + 3] * x[j + 3];
+        sum4 += w_row[j + 4] * x[j + 4];
+        sum5 += w_row[j + 5] * x[j + 5];
+        sum6 += w_row[j + 6] * x[j + 6];
+        sum7 += w_row[j + 7] * x[j + 7];
+    }
+    
+    float sum_tail = 0.0f;
+    for (; j < n; j++) {
+        sum_tail += w_row[j] * x[j];
+    }
+    
+    return (sum0 + sum1 + sum2 + sum3) + (sum4 + sum5 + sum6 + sum7) + sum_tail;
+}
 
 /**
  * @brief Worker thread function for parallel matmul
+ * @author Hadiya Muneeb
  * 
  * This thread stays alive and processes work items repeatedly,
  * eliminating thread creation/destruction overhead.
+ * 
+ * @param arg Pointer to ThreadPoolWorker struct.
  */
 void matmul_worker_thread(void* arg) {
     ThreadPoolWorker* worker = (ThreadPoolWorker*)arg;
     MatmulWork* work = worker->work;
     
-    while (1) {
+    while (!(*worker->should_exit)) {
         // Wait for work
         while (!(*work->work_ready) && !(*worker->should_exit)) {
-            // Busy-wait with occasional yield
-            // In a real system, you'd use a condition variable
             yield(); // Yield to allow other threads to run
-        }
-        
-        if (*worker->should_exit) {
-            thread_exit();
         }
         
         // Process work
         for (int i = work->start_row; i < work->end_row; i++) {
-            float val = 0.0f;
             float* w_row = &work->w[i * work->n];
-            
-            // Inner loop optimization: better cache locality
-            for (int j = 0; j < work->n; j++) {
-                val += w_row[j] * work->x[j];
-            }
-            work->xout[i] = val;
+            // Use the unrolled dot-product for better throughput
+            work->xout[i] = dot_product_unrolled(w_row, work->x, work->n);
         }
         
         // Signal completion
         *work->work_done = 1;
         *work->work_ready = 0;
     }
+    thread_exit();
 }
 
 /**
  * @brief Initialize the thread pool (called once at startup)
  */
 void init_thread_pool(void) {
+    // If already initialized, do nothing
     if (thread_pool_initialized) return;
+
+    // Reset exit flag
     thread_pool_exit = 0;
 
+    // Allocate arrays
     int n = g_num_threads;
+
     thread_ids = malloc(sizeof(int) * n);
     work_items = malloc(sizeof(MatmulWork) * n);
     work_ready = malloc(sizeof(volatile int) * n);
@@ -258,11 +326,16 @@ void init_thread_pool(void) {
         work_ready[t] = 0;
         work_done[t] = 0;
 
+        // Allocate and initialize worker struct
         ThreadPoolWorker* worker = malloc(sizeof(ThreadPoolWorker));
         if (!worker) {
             eprintf("worker malloc failed\n");
             release_and_exit(EXIT_FAILURE);
         }
+
+        // Initialize worker fields
+        // User references so that modifying the global flags
+        // Directly affects the worker threads
         worker->thread_id = t;
         worker->work = &work_items[t];
         worker->should_exit = &thread_pool_exit;
@@ -279,18 +352,22 @@ void init_thread_pool(void) {
         }
     }
 
+    // Mark as initialized
     thread_pool_initialized = 1;
 } 
 
 /**
  * @brief Shutdown the thread pool (called at program exit)
+ * @author Hadiya Muneeb
  */
 void shutdown_thread_pool(void) {
     if (!thread_pool_initialized) return;
 
+    // Signal threads to exit
     thread_pool_exit = 1;
 
     for (int t = 0; t < g_num_threads; t++) {
+        // Waiting for threads to exit...
         if (thread_ids && thread_ids[t] > 0) thread_join(thread_ids[t]);
     }
 
@@ -340,23 +417,26 @@ void matmul(float* xout, float* x, float* w, int n, int d) {
         return;
     }
   
-    
-    // Calculate work distribution
-    // Use larger chunks for better cache locality
-    int chunk_size = (d + g_num_threads - 1) / g_num_threads;
-    int num_active_threads = (d + chunk_size - 1) / chunk_size;
+    const int CACHE_LINE_FLOATS = 16;
+    int min_rows_per_thread = 64;
+    int max_threads = d / min_rows_per_thread;
+    if (max_threads > g_num_threads) max_threads = g_num_threads;
+    if (max_threads < 1) max_threads = 1;
+
+    int rows_per_thread = (d + max_threads - 1) / max_threads;
+    rows_per_thread = ((rows_per_thread + CACHE_LINE_FLOATS - 1) / CACHE_LINE_FLOATS) * CACHE_LINE_FLOATS;
+
+    int num_active_threads = (d + rows_per_thread - 1) / rows_per_thread;
     if (num_active_threads > g_num_threads) {
         num_active_threads = g_num_threads;
     }
-    
-    // Distribute work to threads
+
     for (int t = 0; t < num_active_threads; t++) {
-        int start_row = t * chunk_size;
-        int end_row = start_row + chunk_size;
+        int start_row = t * rows_per_thread;
+        int end_row = start_row + rows_per_thread;
         if (end_row > d) end_row = d;
-        
         if (start_row >= d) break;
-        
+
         work_items[t].xout = xout;
         work_items[t].x = x;
         work_items[t].w = w;
@@ -365,15 +445,11 @@ void matmul(float* xout, float* x, float* w, int n, int d) {
         work_items[t].start_row = start_row;
         work_items[t].end_row = end_row;
         work_done[t] = 0;
-        work_ready[t] = 1;  // Signal work is ready
+        work_ready[t] = 1;
     }
-    
-    // Wait for all threads to complete
+
     for (int t = 0; t < num_active_threads; t++) {
-        while (!work_done[t]) {
-            // Busy-wait for completion
-            // Could add a yield here if your system supports it
-        }
+        while (!work_done[t]) { }
     }
     
     perf_end_function("matmul");
@@ -582,22 +658,6 @@ void softmax(float* x, int size) {
   }
   perf_end_function("softmax");
 }
-
-// void matmul(float* xout, float* x, float* w, int n, int d) {
-//   perf_start_function("matmul");
-//   // W (d,n) @ x (n,) -> xout (d,)
-//   // by far the most amount of time is spent inside this little function
-//   int i;
-//   // #pragma omp parallel for private(i)
-//   for (i = 0; i < d; i++) {
-//     float val = 0.0f;
-//     for (int j = 0; j < n; j++) {
-//       val += w[i * n + j] * x[j];
-//     }
-//     xout[i] = val;
-//   }
-//   perf_end_function("matmul");
-// }
 
 float* forward(Transformer* transformer, int token, int pos) {
   perf_start_function("forward");
