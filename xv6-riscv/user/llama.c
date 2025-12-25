@@ -1,5 +1,5 @@
 /**
- * @file run.c
+ * @file llama.c
  * @brief Pure C llama inference program integrated with xv6 userland and persistent shared memory caching.
  *
  * @author Hadiya Muneeb
