@@ -659,6 +659,65 @@ void softmax(float* x, int size) {
   perf_end_function("softmax");
 }
 
+/**
+ * @brief Multi-head attention mechanism.
+ * 
+ * @param s Pointer to the current run state.
+ * @param p Pointer to the model configuration.
+ * @param w Pointer to the model weights.
+ * @param l Current layer index.
+ * @param pos Current position in the sequence.
+ */
+static void multihead_attention(RunState* s, Config* p, TransformerWeights* w, unsigned long long l, int pos) {
+  perf_start_function("multihead_attention");
+  // compute derived sizes locally to keep interface small
+  int head_size = p->dim / p->n_heads;
+  int kv_dim = (p->dim * p->n_kv_heads) / p->n_heads;
+  int kv_mul = p->n_heads / p->n_kv_heads;
+  int loff = l * p->seq_len * kv_dim;
+
+  // iterate all heads and compute attention outputs into s->xb per-head slice
+  for (int h = 0; h < p->n_heads; h++) {
+    // get the query vector for this head
+    float* q = s->q + h * head_size;
+    // attention scores for this head
+    float* att = s->att + h * p->seq_len;
+    // iterate over all timesteps, including the current one
+    for (int t = 0; t <= pos; t++) {
+      // get the key vector for this head and at this timestep
+      float* k = s->key_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
+      // calculate the attention score as the dot product of q and k
+      float score = 0.0f;
+      for (int i = 0; i < head_size; i++) {
+        score += q[i] * k[i];
+      }
+      score /= sqrtf(head_size);
+      // save the score to the attention buffer
+      att[t] = score;
+    }
+
+    // softmax the scores to get attention weights, from 0..pos inclusively
+    softmax(att, pos + 1);
+
+    // weighted sum of the values, store back into xb
+    float* xb = s->xb + h * head_size;
+    memset(xb, 0, head_size * sizeof(float));
+    for (int t = 0; t <= pos; t++) {
+      // get the value vector for this head and at this timestep
+      float* v = s->value_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
+      // get the attention weight for this timestep
+      float a = att[t];
+      // accumulate the weighted value into xb
+      for (int i = 0; i < head_size; i++) {
+        xb[i] += a * v[i];
+      }
+    }
+  }
+
+  perf_end_function("multihead_attention");
+}
+
+
 float* forward(Transformer* transformer, int token, int pos) {
   perf_start_function("forward");
 
@@ -669,7 +728,6 @@ float* forward(Transformer* transformer, int token, int pos) {
   float* x = s->x;
   int dim = p->dim;
   int kv_dim = (p->dim * p->n_kv_heads) / p->n_heads;
-  int kv_mul = p->n_heads / p->n_kv_heads; // integer multiplier of the kv sharing in multiquery
   int hidden_dim = p->hidden_dim;
   int head_size = dim / p->n_heads;
 
@@ -710,45 +768,8 @@ float* forward(Transformer* transformer, int token, int pos) {
       }
     }
 
-    // multihead attention. iterate over all heads
-    int h;
-    // #pragma omp parallel for private(h)
-    for (h = 0; h < p->n_heads; h++) {
-      // get the query vector for this head
-      float* q = s->q + h * head_size;
-      // attention scores for this head
-      float* att = s->att + h * p->seq_len;
-      // iterate over all timesteps, including the current one
-      for (int t = 0; t <= pos; t++) {
-        // get the key vector for this head and at this timestep
-        float* k = s->key_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
-        // calculate the attention score as the dot product of q and k
-        float score = 0.0f;
-        for (int i = 0; i < head_size; i++) {
-          score += q[i] * k[i];
-        }
-        score /= sqrtf(head_size);
-        // save the score to the attention buffer
-        att[t] = score;
-      }
-
-      // softmax the scores to get attention weights, from 0..pos inclusively
-      softmax(att, pos + 1);
-
-      // weighted sum of the values, store back into xb
-      float* xb = s->xb + h * head_size;
-      memset(xb, 0, head_size * sizeof(float));
-      for (int t = 0; t <= pos; t++) {
-        // get the value vector for this head and at this timestep
-        float* v = s->value_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
-        // get the attention weight for this timestep
-        float a = att[t];
-        // accumulate the weighted value into xb
-        for (int i = 0; i < head_size; i++) {
-          xb[i] += a * v[i];
-        }
-      }
-    }
+    // multihead attention (extracted)
+    multihead_attention(s, p, w, l, pos);
 
     // final matmul to get the output of the attention
     matmul(s->xb2, s->xb, w->wo + l * dim * dim, dim, dim);
@@ -1524,6 +1545,7 @@ int main(int argc, char* argv[]) {
   perf_register_function("generate");
   perf_register_function("chat");
   perf_register_function("forward");
+  perf_register_function("multihead_attention");
   perf_register_function("matmul");
   perf_register_function("rmsnorm");
   perf_register_function("softmax");
