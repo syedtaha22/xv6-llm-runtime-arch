@@ -237,7 +237,14 @@ freeproc(struct proc *p)
   }
 }
 
-// Create a new thread in the same address space as the caller
+/**
+ * @brief Create a new thread in the same address space as the caller.
+ * @author Syed Taha
+ * 
+ * @param start_routine The function pointer where the thread starts execution.
+ * @param arg The argument to pass to the start_routine.
+ * @return int The thread ID (tid) on success, -1 on failure.
+ */
 int thread_create(uint64 start_routine, uint64 arg) {
   struct proc *np;
   struct proc *p = myproc();
@@ -281,7 +288,6 @@ int thread_create(uint64 start_routine, uint64 arg) {
     release(&np->lock);
     return -1;
   }
-
 
   // Allocate a new user stack page at a page-aligned address at the
   // top of the address space and map it into the new thread's pagetable.
@@ -363,17 +369,21 @@ int thread_create(uint64 start_routine, uint64 arg) {
   return np->tid;
 }
 
-// Block until a thread in the same group with id thread_id exits.
-int
-thread_join(int thread_id)
-{
-  int havekids;
+/**
+ * @brief Block until a thread in the same group with id thread_id exits.
+ * @author Syed Taha
+ * 
+ * @param thread_id The thread ID to join.
+ * @return int 0 on success, -1 on failure (no such thread or killed).
+ */
+int thread_join(int thread_id) {
   struct proc *p = myproc();
   struct proc *main_proc = p->is_thread ? p->thread_group : p;
 
   acquire(&wait_lock);
 
   for(;;){
+    int havekids = 0;
     // Scan only the thread list for this group leader.
     struct proc *t;
     acquire(&main_proc->lock);
@@ -402,8 +412,10 @@ thread_join(int thread_id)
   }
 }
 
-// Exit current thread. Does not free shared user pages; marks thread
-// ZOMBIE and wakes up any joiners.
+/**
+ * @brief Exit the current thread, marking it as ZOMBIE and waking up any joiners.
+ * @author Syed Taha
+ */
 void
 thread_exit(void)
 {
