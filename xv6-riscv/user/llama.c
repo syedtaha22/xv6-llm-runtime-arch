@@ -84,7 +84,6 @@ typedef uint32 size_t;
 void* GLOBAL_WEIGHTS_PTR = NULL; // global pointer to the model weights in shared memory
 void* GLOBAL_TOKENIZER_PTR = NULL; // global pointer to the tokenizer data in shared memory
 
-
 void shutdown_thread_pool(void);
 
 /**
@@ -166,27 +165,62 @@ void* fetch_if_not_cached(const char* segment_name, int expected_size, char* (*f
 
 
 // ------------------------------------------------------------------------------
-// Thread Pool for Parallel Matrix Multiplication
-//
-// Make thread pool only once to prevent overhead of thread creation/destruction
+// Data Structures for Model (Pre-declared for threading)
 // ------------------------------------------------------------------------------
 
+typedef struct {
+  int dim;
+  int hidden_dim;
+  int n_layers;
+  int n_heads;
+  int n_kv_heads;
+  int vocab_size;
+  int seq_len;
+} Config;
+
+typedef struct {
+  float* token_embedding_table;
+  float* rms_att_weight;
+  float* rms_ffn_weight;
+  float* wq;
+  float* wk;
+  float* wv;
+  float* wo;
+  float* w1;
+  float* w2;
+  float* w3;
+  float* rms_final_weight;
+  float* wcls;
+} TransformerWeights;
+
+typedef struct {
+  float* x;
+  float* xb;
+  float* xb2;
+  float* hb;
+  float* hb2;
+  float* q;
+  float* k;
+  float* v;
+  float* att;
+  float* logits;
+  float* key_cache;
+  float* value_cache;
+} RunState;
+
+// ------------------------------------------------------------------------------
+// Thread Pool for Parallel Execution (MatMul + Attention)
+// ------------------------------------------------------------------------------
+
+// Task Types
+typedef enum {
+    TASK_NONE = 0,
+    TASK_MATMUL = 1,
+    TASK_ATTENTION = 2
+} TaskType;
+
 /**
- * @brief Structure representing a matrix multiplication work item.
- * Each work item defines a portion of the matrix multiplication task
- * to be processed by a worker thread.
- * 
- * @param xout Output vector pointer.
- * @param x Input vector pointer.
- * @param w Weight matrix pointer.
- * @param n Number of columns in weight matrix / length of input vector.
- * @param d Number of rows in weight matrix / length of output vector.
- * @param start_row Starting row index for this work item.
- * @param end_row Ending row index (exclusive) for this work item.
- * @param work_ready Pointer to a flag indicating if work is ready.
- * @param work_done Pointer to a flag indicating if work is done.
- * 
- * @author Hadiya Muneeb
+ * @brief Matmul Work Item
  */
 typedef struct {
     float* xout;
@@ -196,9 +230,20 @@ typedef struct {
     int d;
     int start_row;
     int end_row;
-    volatile int* work_ready;
-    volatile int* work_done;
 } MatmulWork; 
+
+/**
+ * @brief Attention Work Item
+ */
+typedef struct {
+    RunState* s;
+    Config* p;
+    TransformerWeights* w;
+    unsigned long long layer;
+    int pos;
+    int head_start;
+    int head_end;
+} AttentionWork;
 
 
 /**
@@ -207,27 +252,45 @@ typedef struct {
  * exit flag, and function pointer for the specific worker implementation.
  * 
  * @param thread_id Unique identifier for the thread.
- * @param work Pointer to the MatmulWork assigned to this worker.
- * @param should_exit Pointer to a flag indicating if the thread should exit.
- * @param worker_fn Function pointer for the worker's processing function.
+ * @param task_type Type of task assigned to the worker (TaskType enum).
+ * @param mm_work Pointer to the Matmul work item.
+ * @param att_work Pointer to the Attention work item.
+ * @param work_ready Pointer to the flag indicating if work is ready.
+ * @param work_done Pointer to the flag indicating if work is done.
+ * @param should_exit Pointer to the flag indicating if the worker should exit.
  * 
  * @author Hadiya Muneeb
  */
 typedef struct {
     int thread_id;
-    MatmulWork* work;
+    
+    // Task definition
+    volatile int task_type; // TaskType enum
+    MatmulWork* mm_work;
+    AttentionWork* att_work;
+
+    // Synchronization flags
+    volatile int* work_ready;
+    volatile int* work_done;
     volatile int* should_exit;
 } ThreadPoolWorker;
 
 // Global thread pool state. @todo encapsulate in a struct if needed.
 static int thread_pool_initialized = 0;       /// @brief Flag indicating if the thread pool is initialized
 static int* thread_ids = NULL;                /// @brief Array of thread IDs
-static MatmulWork* work_items = NULL;         /// @brief Array of work items
 static volatile int* work_ready = NULL;       /// @brief Array of work ready flags
 static volatile int* work_done = NULL;        /// @brief Array of work done flags
 static ThreadPoolWorker** worker_ptrs = NULL; /// @brief Array of pointers to ThreadPoolWorker structs
 static volatile int thread_pool_exit = 0;     /// @brief Flag to signal thread pool shutdown
 static volatile int g_num_threads = 3;        /// @brief Number of threads in the pool
+
+
+// Work Item Storage
+static MatmulWork* mm_work_items = NULL;
+static AttentionWork* att_work_items = NULL;
+
+// Forward decls
+void softmax(float* x, int size);
 
 /**
  * @brief Unrolled dot-product computation for better performance.
@@ -267,34 +330,83 @@ static inline float dot_product_unrolled(float* w_row, float* x, int n) {
 }
 
 /**
- * @brief Worker thread function for parallel matmul
- * @author Hadiya Muneeb
- * 
- * This thread stays alive and processes work items repeatedly,
- * eliminating thread creation/destruction overhead.
- * 
- * @param arg Pointer to ThreadPoolWorker struct.
+ * @brief Dedicated worker for processing attention heads.
  */
-void matmul_worker_thread(void* arg) {
+static void worker_do_attention(AttentionWork* work) {
+    // Extract context
+    RunState* s = work->s;
+    Config* p = work->p;
+    // TransformerWeights* w = work->w; // Unused in this specific kernel part
+    int layer = work->layer;
+    int pos = work->pos;
+
+    int head_size = p->dim / p->n_heads;
+    int kv_dim = (p->dim * p->n_kv_heads) / p->n_heads;
+    int kv_mul = p->n_heads / p->n_kv_heads;
+    int loff = layer * p->seq_len * kv_dim;
+
+    // Iterate assigned heads
+    for (int h = work->head_start; h < work->head_end; h++) {
+        // --- 1. Score Calculation (Q * K) ---
+        float* q = s->q + h * head_size;
+        float* att = s->att + h * p->seq_len;
+        
+        for (int t = 0; t <= pos; t++) {
+            float* k = s->key_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
+            // Use unrolled dot product optimization
+            float score = dot_product_unrolled(q, k, head_size);
+            score /= sqrtf(head_size);
+            att[t] = score;
+        }
+
+        // --- 2. Softmax ---
+        // Operates on the time dimension, safe to do per-head
+        softmax(att, pos + 1);
+
+        // --- 3. Weighted Sum (Att * V) ---
+        float* xb = s->xb + h * head_size;
+        // Zero output buffer
+        for(int i=0; i<head_size; i++) xb[i] = 0.0f;
+        
+        for (int t = 0; t <= pos; t++) {
+            float* v = s->value_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
+            float a = att[t];
+            for (int i = 0; i < head_size; i++) {
+                xb[i] += a * v[i];
+            }
+        }
+    }
+}
+
+/**
+ * @brief Universal Worker Thread
+ * Waits for signal, checks task type, executes, signals done.
+ */
+void universal_worker_thread(void* arg) {
     ThreadPoolWorker* worker = (ThreadPoolWorker*)arg;
-    MatmulWork* work = worker->work;
     
     while (!(*worker->should_exit)) {
-        // Wait for work
-        while (!(*work->work_ready) && !(*worker->should_exit)) {
-            yield(); // Yield to allow other threads to run
+        // Spin-wait with yield
+        while (!(*worker->work_ready) && !(*worker->should_exit)) {
+            yield(); 
         }
-        
-        // Process work
-        for (int i = work->start_row; i < work->end_row; i++) {
-            float* w_row = &work->w[i * work->n];
-            // Use the unrolled dot-product for better throughput
-            work->xout[i] = dot_product_unrolled(w_row, work->x, work->n);
+
+        if (*worker->should_exit) break;
+
+        if (worker->task_type == TASK_MATMUL) {
+            MatmulWork* work = worker->mm_work;
+            for (int i = work->start_row; i < work->end_row; i++) {
+                float* w_row = &work->w[i * work->n];
+                work->xout[i] = dot_product_unrolled(w_row, work->x, work->n);
+            }
+        } 
+        else if (worker->task_type == TASK_ATTENTION) {
+            worker_do_attention(worker->att_work);
         }
-        
+
         // Signal completion
-        *work->work_done = 1;
-        *work->work_ready = 0;
+        *worker->work_done = 1;
+        *worker->work_ready = 0;
     }
     thread_exit();
 }
@@ -313,11 +425,13 @@ void init_thread_pool(void) {
     int n = g_num_threads;
 
     thread_ids = malloc(sizeof(int) * n);
-    work_items = malloc(sizeof(MatmulWork) * n);
+    mm_work_items = malloc(sizeof(MatmulWork) * n);
+    att_work_items = malloc(sizeof(AttentionWork) * n); // Alloc attn work
     work_ready = malloc(sizeof(volatile int) * n);
     work_done = malloc(sizeof(volatile int) * n);
     worker_ptrs = malloc(sizeof(ThreadPoolWorker*) * n);
-    if (!thread_ids || !work_items || !work_ready || !work_done || !worker_ptrs) {
+
+    if (!thread_ids || !mm_work_items || !att_work_items || !worker_ptrs) {
         eprintf("thread pool malloc failed\n");
         release_and_exit(EXIT_FAILURE);
     }
@@ -337,22 +451,16 @@ void init_thread_pool(void) {
         // User references so that modifying the global flags
         // Directly affects the worker threads
         worker->thread_id = t;
-        worker->work = &work_items[t];
+        worker->mm_work = &mm_work_items[t];
+        worker->att_work = &att_work_items[t];
         worker->should_exit = &thread_pool_exit;
+        worker->work_ready = &work_ready[t];
+        worker->work_done = &work_done[t];
+        
         worker_ptrs[t] = worker;
 
-        work_items[t].work_ready = &work_ready[t];
-        work_items[t].work_done = &work_done[t];
-
-        thread_ids[t] = thread_create(matmul_worker_thread, worker);
-
-        if (thread_ids[t] < 0) {
-            eprintf("Failed to create worker thread %d\n", t);
-            release_and_exit(EXIT_FAILURE);
-        }
+        thread_ids[t] = thread_create(universal_worker_thread, worker);
     }
-
-    // Mark as initialized
     thread_pool_initialized = 1;
 } 
 
@@ -371,17 +479,13 @@ void shutdown_thread_pool(void) {
         if (thread_ids && thread_ids[t] > 0) thread_join(thread_ids[t]);
     }
 
-    // free worker structs
-    for (int t = 0; t < g_num_threads; t++) {
-        if (worker_ptrs && worker_ptrs[t]) free(worker_ptrs[t]);
-    }
-    free(worker_ptrs); worker_ptrs = NULL;
-
-    free(thread_ids); thread_ids = NULL;
-    free(work_items); work_items = NULL;
-    free((void*)work_ready); work_ready = NULL;
-    free((void*)work_done); work_done = NULL;
-
+    for (int t = 0; t < g_num_threads; t++) free(worker_ptrs[t]);
+    free(worker_ptrs);
+    free(thread_ids);
+    free(mm_work_items);
+    free(att_work_items);
+    free((void*)work_ready);
+    free((void*)work_done);
     thread_pool_initialized = 0;
 } 
 
@@ -403,8 +507,8 @@ void shutdown_thread_pool(void) {
 void matmul(float* xout, float* x, float* w, int n, int d) {
     perf_start_function("matmul");
     
-    // For small matrices, single-threaded is faster due to overhead
-    if (d < 128) {
+    // Fallback for small matrices or uninitialized pool
+    if (d < 128 || !thread_pool_initialized) {
         for (int i = 0; i < d; i++) {
             float val = 0.0f;
             float* w_row = &w[i * n];
@@ -417,19 +521,13 @@ void matmul(float* xout, float* x, float* w, int n, int d) {
         return;
     }
   
-    const int CACHE_LINE_FLOATS = 16;
-    int min_rows_per_thread = 64;
-    int max_threads = d / min_rows_per_thread;
-    if (max_threads > g_num_threads) max_threads = g_num_threads;
-    if (max_threads < 1) max_threads = 1;
-
-    int rows_per_thread = (d + max_threads - 1) / max_threads;
-    rows_per_thread = ((rows_per_thread + CACHE_LINE_FLOATS - 1) / CACHE_LINE_FLOATS) * CACHE_LINE_FLOATS;
+    // Thread distribution logic
+    int rows_per_thread = (d + g_num_threads - 1) / g_num_threads;
+    // Align to 16 floats (cache line friendly)
+    rows_per_thread = ((rows_per_thread + 15) / 16) * 16; 
 
     int num_active_threads = (d + rows_per_thread - 1) / rows_per_thread;
-    if (num_active_threads > g_num_threads) {
-        num_active_threads = g_num_threads;
-    }
+    if (num_active_threads > g_num_threads) num_active_threads = g_num_threads;
 
     for (int t = 0; t < num_active_threads; t++) {
         int start_row = t * rows_per_thread;
@@ -437,81 +535,35 @@ void matmul(float* xout, float* x, float* w, int n, int d) {
         if (end_row > d) end_row = d;
         if (start_row >= d) break;
 
-        work_items[t].xout = xout;
-        work_items[t].x = x;
-        work_items[t].w = w;
-        work_items[t].n = n;
-        work_items[t].d = d;
-        work_items[t].start_row = start_row;
-        work_items[t].end_row = end_row;
+        mm_work_items[t].xout = xout;
+        mm_work_items[t].x = x;
+        mm_work_items[t].w = w;
+        mm_work_items[t].n = n;
+        mm_work_items[t].d = d;
+        mm_work_items[t].start_row = start_row;
+        mm_work_items[t].end_row = end_row;
+        
+        worker_ptrs[t]->task_type = TASK_MATMUL; // Set Task Type
+        
         work_done[t] = 0;
         work_ready[t] = 1;
     }
 
     for (int t = 0; t < num_active_threads; t++) {
-        while (!work_done[t]) { }
+        while (!work_done[t]) { yield(); }
     }
     
     perf_end_function("matmul");
 }
 
-
 // ----------------------------------------------------------------------------
-// Transformer model
+// Model Structure & Logic
+// ----------------------------------------------------------------------------
 
 typedef struct {
-  int dim; // transformer dimension
-  int hidden_dim; // for ffn layers
-  int n_layers; // number of layers
-  int n_heads; // number of query heads
-  int n_kv_heads; // number of key/value heads (can be < query heads because of multiquery)
-  int vocab_size; // vocabulary size, usually 256 (byte-level)
-  int seq_len; // max sequence length
-} Config;
-
-typedef struct {
-  // token embedding table
-  float* token_embedding_table;    // (vocab_size, dim)
-  // weights for rmsnorms
-  float* rms_att_weight; // (layer, dim) rmsnorm weights
-  float* rms_ffn_weight; // (layer, dim)
-  // weights for matmuls. note dim == n_heads * head_size
-  float* wq; // (layer, dim, n_heads * head_size)
-  float* wk; // (layer, dim, n_kv_heads * head_size)
-  float* wv; // (layer, dim, n_kv_heads * head_size)
-  float* wo; // (layer, n_heads * head_size, dim)
-  // weights for ffn
-  float* w1; // (layer, hidden_dim, dim)
-  float* w2; // (layer, dim, hidden_dim)
-  float* w3; // (layer, hidden_dim, dim)
-  // final rmsnorm
-  float* rms_final_weight; // (dim,)
-  // (optional) classifier weights for the logits, on the last layer
-  float* wcls;
-} TransformerWeights;
-
-typedef struct {
-  // current wave of activations
-  float* x; // activation at current time stamp (dim,)
-  float* xb; // same, but inside a residual branch (dim,)
-  float* xb2; // an additional buffer just for convenience (dim,)
-  float* hb; // buffer for hidden dimension in the ffn (hidden_dim,)
-  float* hb2; // buffer for hidden dimension in the ffn (hidden_dim,)
-  float* q; // query (dim,)
-  float* k; // key (dim,)
-  float* v; // value (dim,)
-  float* att; // buffer for scores/attention values (n_heads, seq_len)
-  float* logits; // output logits
-  // kv cache
-  float* key_cache;   // (layer, seq_len, dim)
-  float* value_cache; // (layer, seq_len, dim)
-} RunState;
-
-typedef struct {
-  Config config; // the hyperparameters of the architecture (the blueprint)
-  TransformerWeights weights; // the weights of the model
-  RunState state; // buffers for the "wave" of activations in the forward pass
-  // some more state needed to properly clean up the memory mapping (sigh)
+  Config config; 
+  TransformerWeights weights; 
+  RunState state; 
 } Transformer;
 
 void malloc_run_state(RunState* s, Config* p) {
@@ -578,7 +630,6 @@ void memory_map_weights(TransformerWeights* w, Config* p, float* ptr, int shared
   ptr += p->seq_len * head_size / 2; // skip what used to be freq_cis_imag (for RoPE)
   w->wcls = shared_weights ? w->token_embedding_table : ptr;
 }
-// read_checkpoint removed
 
 /**
  * @brief Initialize Transformer model using weights stored in shared memory.
@@ -638,7 +689,6 @@ void rmsnorm(float* o, float* x, float* weight, int size) {
 }
 
 void softmax(float* x, int size) {
-  perf_start_function("softmax");
   // find max value (for numerical stability)
   float max_val = x[0];
   for (int i = 1; i < size; i++) {
@@ -656,11 +706,12 @@ void softmax(float* x, int size) {
   for (int i = 0; i < size; i++) {
     x[i] /= sum;
   }
-  perf_end_function("softmax");
 }
 
 /**
- * @brief Multi-head attention mechanism.
+ * @brief Hybrid Parallel Multi-Head Attention
+ * Uses static head partitioning. If pos < 32, runs sequentially.
+ * If pos >= 32, dispatches to worker pool.
  * 
  * @param s Pointer to the current run state.
  * @param p Pointer to the model configuration.
@@ -670,50 +721,54 @@ void softmax(float* x, int size) {
  */
 static void multihead_attention(RunState* s, Config* p, TransformerWeights* w, unsigned long long l, int pos) {
   perf_start_function("multihead_attention");
-  // compute derived sizes locally to keep interface small
-  int head_size = p->dim / p->n_heads;
-  int kv_dim = (p->dim * p->n_kv_heads) / p->n_heads;
-  int kv_mul = p->n_heads / p->n_kv_heads;
-  int loff = l * p->seq_len * kv_dim;
 
-  // iterate all heads and compute attention outputs into s->xb per-head slice
-  for (int h = 0; h < p->n_heads; h++) {
-    // get the query vector for this head
-    float* q = s->q + h * head_size;
-    // attention scores for this head
-    float* att = s->att + h * p->seq_len;
-    // iterate over all timesteps, including the current one
-    for (int t = 0; t <= pos; t++) {
-      // get the key vector for this head and at this timestep
-      float* k = s->key_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
-      // calculate the attention score as the dot product of q and k
-      float score = 0.0f;
-      for (int i = 0; i < head_size; i++) {
-        score += q[i] * k[i];
-      }
-      score /= sqrtf(head_size);
-      // save the score to the attention buffer
-      att[t] = score;
-    }
-
-    // softmax the scores to get attention weights, from 0..pos inclusively
-    softmax(att, pos + 1);
-
-    // weighted sum of the values, store back into xb
-    float* xb = s->xb + h * head_size;
-    memset(xb, 0, head_size * sizeof(float));
-    for (int t = 0; t <= pos; t++) {
-      // get the value vector for this head and at this timestep
-      float* v = s->value_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
-      // get the attention weight for this timestep
-      float a = att[t];
-      // accumulate the weighted value into xb
-      for (int i = 0; i < head_size; i++) {
-        xb[i] += a * v[i];
-      }
-    }
+  // HYBRID CHECK: If sequence is short, overhead > gain. Run sequentially.
+  if (pos < 32 || !thread_pool_initialized) {
+      // Create a temporary "work" item on stack and run it directly
+      // This reuses the exact same logic as the workers
+      AttentionWork seq_work = {
+          .s = s, .p = p, .w = w, 
+          .layer = l, .pos = pos, 
+          .head_start = 0, .head_end = p->n_heads
+      };
+      worker_do_attention(&seq_work);
+      perf_end_function("multihead_attention");
+      return;
   }
 
+  // PARALLEL DISPATCH
+  
+  int heads_per_thread = (p->n_heads + g_num_threads - 1) / g_num_threads;
+  int num_active_threads = (p->n_heads + heads_per_thread - 1) / heads_per_thread;
+  if (num_active_threads > g_num_threads) num_active_threads = g_num_threads;
+
+  for (int t = 0; t < num_active_threads; t++) {
+      int start = t * heads_per_thread;
+      int end = start + heads_per_thread;
+      if (end > p->n_heads) end = p->n_heads;
+      if (start >= p->n_heads) break;
+
+      att_work_items[t].s = s;
+      att_work_items[t].p = p;
+      att_work_items[t].w = w;
+      att_work_items[t].layer = l;
+      att_work_items[t].pos = pos;
+      att_work_items[t].head_start = start;
+      att_work_items[t].head_end = end;
+
+      worker_ptrs[t]->task_type = TASK_ATTENTION;
+      
+      work_done[t] = 0;
+      work_ready[t] = 1; // Signal
+  }
+
+  // Synchronization
+  for (int t = 0; t < num_active_threads; t++) 
+      while (!work_done[t]) {
+        // yeild to avoid busy-waiting  
+        yield(); 
+      }
+  
   perf_end_function("multihead_attention");
 }
 
@@ -768,7 +823,7 @@ float* forward(Transformer* transformer, int token, int pos) {
       }
     }
 
-    // multihead attention (extracted)
+    // Call Hybrid Parallel Attention
     multihead_attention(s, p, w, l, pos);
 
     // final matmul to get the output of the attention
@@ -1548,7 +1603,6 @@ int main(int argc, char* argv[]) {
   perf_register_function("multihead_attention");
   perf_register_function("matmul");
   perf_register_function("rmsnorm");
-  perf_register_function("softmax");
   perf_register_function("sample");
   perf_register_function("encode");
   perf_register_function("decode");
