@@ -242,6 +242,10 @@ sys_yield(void)
 uint64
 sys_setpriority(void)
 {
+#if !defined(PRIORITY_SCHED) && !defined(MLFQ_SCHED)
+  // Priority scheduling not enabled - no-op
+  return 0;
+#else
   int pid, priority;
   struct proc *p;
 
@@ -252,49 +256,54 @@ sys_setpriority(void)
   if (priority < 0 || priority > 31)
     return -1;
 
-  // If pid is 0, set priority for current process
-  if (pid == 0)
-  {
+  // If pid is 0, use current process
+  if (pid == 0) {
     p = myproc();
-#if defined(PRIORITY_SCHED) || defined(MLFQ_SCHED)
+  } else {
+    // Find process by PID
+    p = 0;
+    for (struct proc *iter = proc; iter < &proc[NPROC]; iter++) {
+      acquire(&iter->lock);
+      if (iter->pid == pid) {
+        p = iter;
+        // Keep lock held - we'll release it below
+        break;
+      }
+      release(&iter->lock);
+    }
+    
+    if (p == 0)
+      return -1; // Process not found
+  }
+
+  // Set priority (lock already held for non-current processes)
+  if (pid != 0) {
     p->priority = priority;
 #ifdef MLFQ_SCHED
-    // For MLFQ, also reset to appropriate queue based on priority
+    // For MLFQ, map priority to queue level
     if (priority <= 10)
-      p->queue_level = 0; // High priority -> highest queue
+      p->queue_level = 0;      // High priority -> highest queue
     else if (priority <= 20)
-      p->queue_level = 1; // Medium priority -> middle queue
+      p->queue_level = 1;      // Medium priority -> middle queue
     else
-      p->queue_level = 2; // Low priority -> lowest queue
-    p->time_slice = 1;    // Reset time slice
+      p->queue_level = 2;      // Low priority -> lowest queue
+    p->time_slice = 1;         // Reset time slice
 #endif
-#endif
-    return 0;
-  }
-
-  // Find process by PID and set its priority
-  for (p = proc; p < &proc[NPROC]; p++)
-  {
-    acquire(&p->lock);
-    if (p->pid == pid)
-    {
-#if defined(PRIORITY_SCHED) || defined(MLFQ_SCHED)
-      p->priority = priority;
-#ifdef MLFQ_SCHED
-      if (priority <= 10)
-        p->queue_level = 0;
-      else if (priority <= 20)
-        p->queue_level = 1;
-      else
-        p->queue_level = 2;
-      p->time_slice = 1;
-#endif
-#endif
-      release(&p->lock);
-      return 0;
-    }
     release(&p->lock);
+  } else {
+    // Current process - no locking needed
+    p->priority = priority;
+#ifdef MLFQ_SCHED
+    if (priority <= 10)
+      p->queue_level = 0;
+    else if (priority <= 20)
+      p->queue_level = 1;
+    else
+      p->queue_level = 2;
+    p->time_slice = 1;
+#endif
   }
 
-  return -1; // Process not found
+  return 0;
+#endif
 }
