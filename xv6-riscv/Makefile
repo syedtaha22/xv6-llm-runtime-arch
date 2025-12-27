@@ -267,6 +267,8 @@ UPROGS=\
 	$U/_testram\
 	$U/_testperf\
 	$U/_schedtest\
+	$U/_mmbench\
+	$U/_mabench\
 
 
 ifeq ($(LAB),util)
