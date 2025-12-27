@@ -40,6 +40,8 @@
 #include "proc.h"
 #include "defs.h"
 
+extern struct proc proc[NPROC];
+
 // MLFQ Configuration Constants
 #define NQUEUE 3           ///< Number of priority queues
 #define TIME_SLICE_0 1     ///< Time slice for highest priority queue (ticks)
