@@ -257,6 +257,11 @@ int thread_create(uint64 start_routine, uint64 arg) {
   np->is_thread = 1;
   np->thread_group = main_proc;
   np->tid = np->pid;
+
+#if defined(PRIORITY_SCHED) || defined(MLFQ_SCHED)
+  np->priority = 0; // Threads inherit highest priority from main process
+#endif
+  
   // link into main process thread list
   acquire(&main_proc->lock);
   np->thread_next = main_proc->thread_head;
@@ -356,15 +361,6 @@ int thread_create(uint64 start_routine, uint64 arg) {
   np->state = RUNNABLE;
   release(&np->lock);
 
-  // Propagate new size to other threads in the group.
-  struct proc *t;
-  for(t = proc; t < &proc[NPROC]; t++){
-    if(t->is_thread && t->thread_group == main_proc && t != np && t->state != UNUSED){
-      acquire(&t->lock);
-      t->sz = main_proc->sz;
-      release(&t->lock);
-    }
-  }
 
   return np->tid;
 }
