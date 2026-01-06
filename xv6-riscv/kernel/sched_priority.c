@@ -35,6 +35,9 @@
 #include "proc.h"
 #include "defs.h"
 
+// External declarations
+extern struct proc proc[NPROC];
+
 /**
  * @brief Priority-based CPU scheduler main loop.
  *
@@ -73,7 +76,7 @@ void scheduler(void)
         struct proc *highest_priority_proc = 0;
         int lowest_priority_val = __INT_MAX__;
 
-        // Scan process table for highest priority RUNNABLE process
+        // Sca[]n0 ]rocess table for highest priority RUNNABLE process
         for (p = proc; p < &proc[NPROC]; p++)
         {
             acquire(&p->lock);

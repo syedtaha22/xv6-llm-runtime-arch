@@ -216,6 +216,8 @@ int             ismapped(pagetable_t, uint64);
 uint64          vmfault(pagetable_t, uint64, int);
 void            freewalk(pagetable_t pagetable);
 int             uvmshare(pagetable_t old, pagetable_t new, uint64 sz); // Share mappings from one pagetable into another (used for threads)
+int             uvmshare_shm(struct proc *parent, struct proc *child);
+
 
 #if defined(LAB_PGTBL) || defined(SOL_MMAP)
 void            vmprint(pagetable_t);

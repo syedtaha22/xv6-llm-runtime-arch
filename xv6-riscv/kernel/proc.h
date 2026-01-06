@@ -165,6 +165,12 @@ struct proc
   struct proc *thread_head;    // head of threads list (for group leader)
   struct proc *thread_next;    // next pointer (for thread list links)
 
+  // Per-process shared memory attachment tracking
+  struct {
+    int shmid;   // -1 if unused
+    uint64 va;   // virtual address where the segment is mapped
+  } shm_attached[NSHM];
+
 // Scheduler-specific fields (conditional compilation)
 #if defined(PRIORITY_SCHED) || defined(MLFQ_SCHED)
   int priority; // Process priority (lower value = higher priority)

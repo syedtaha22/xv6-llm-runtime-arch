@@ -40,6 +40,17 @@ main()
 #ifdef KCSAN
     kcsaninit();
 #endif
+
+// Compile-time scheduler detection
+#if defined(MLFQ_SCHED)
+  printf("Scheduler: MLFQ (Multi-Level Feedback Queue)\n");
+#elif defined(PRIORITY_SCHED)
+  printf("Scheduler: Priority Scheduling\n");
+#else
+  printf("Scheduler: Round Robin (Default)\n");
+#endif
+
+
     __sync_synchronize();
     started = 1;
   } else {

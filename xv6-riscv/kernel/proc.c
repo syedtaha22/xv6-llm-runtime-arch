@@ -127,6 +127,12 @@ found:
   p->pid = allocpid();
   p->state = USED;
 
+  // initialize per-process shared memory attachment slots
+  for (int i = 0; i < NSHM; i++) {
+    p->shm_attached[i].shmid = -1;
+    p->shm_attached[i].va = 0;
+  }
+
   // Allocate a trapframe page.
   if ((p->trapframe = (struct trapframe *)kalloc()) == 0)
   {
@@ -231,7 +237,14 @@ freeproc(struct proc *p)
   }
 }
 
-// Create a new thread in the same address space as the caller
+/**
+ * @brief Create a new thread in the same address space as the caller.
+ * @author Syed Taha
+ * 
+ * @param start_routine The function pointer where the thread starts execution.
+ * @param arg The argument to pass to the start_routine.
+ * @return int The thread ID (tid) on success, -1 on failure.
+ */
 int thread_create(uint64 start_routine, uint64 arg) {
   struct proc *np;
   struct proc *p = myproc();
@@ -244,6 +257,11 @@ int thread_create(uint64 start_routine, uint64 arg) {
   np->is_thread = 1;
   np->thread_group = main_proc;
   np->tid = np->pid;
+
+#if defined(PRIORITY_SCHED) || defined(MLFQ_SCHED)
+  np->priority = 0; // Threads inherit highest priority from main process
+#endif
+  
   // link into main process thread list
   acquire(&main_proc->lock);
   np->thread_next = main_proc->thread_head;
@@ -259,6 +277,17 @@ int thread_create(uint64 start_routine, uint64 arg) {
 
   // Share user memory mappings with main process.
   if(uvmshare(main_proc->pagetable, np->pagetable, main_proc->sz) < 0){
+    proc_freepagetable(np->pagetable, 0);
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
+
+  // Fast-share any shared-memory (SHM) mappings recorded on the parent
+  // into the new thread's pagetable to ensure threads can access parent
+  // SHM without triggering page faults on access.
+  if (uvmshare_shm(main_proc, np) < 0) {
+    // If SHM propagation fails, clean up and abort thread creation.
     proc_freepagetable(np->pagetable, 0);
     freeproc(np);
     release(&np->lock);
@@ -332,30 +361,25 @@ int thread_create(uint64 start_routine, uint64 arg) {
   np->state = RUNNABLE;
   release(&np->lock);
 
-  // Propagate new size to other threads in the group.
-  struct proc *t;
-  for(t = proc; t < &proc[NPROC]; t++){
-    if(t->is_thread && t->thread_group == main_proc && t != np && t->state != UNUSED){
-      acquire(&t->lock);
-      t->sz = main_proc->sz;
-      release(&t->lock);
-    }
-  }
 
   return np->tid;
 }
 
-// Block until a thread in the same group with id thread_id exits.
-int
-thread_join(int thread_id)
-{
-  int havekids;
+/**
+ * @brief Block until a thread in the same group with id thread_id exits.
+ * @author Syed Taha
+ * 
+ * @param thread_id The thread ID to join.
+ * @return int 0 on success, -1 on failure (no such thread or killed).
+ */
+int thread_join(int thread_id) {
   struct proc *p = myproc();
   struct proc *main_proc = p->is_thread ? p->thread_group : p;
 
   acquire(&wait_lock);
 
   for(;;){
+    int havekids = 0;
     // Scan only the thread list for this group leader.
     struct proc *t;
     acquire(&main_proc->lock);
@@ -384,8 +408,10 @@ thread_join(int thread_id)
   }
 }
 
-// Exit current thread. Does not free shared user pages; marks thread
-// ZOMBIE and wakes up any joiners.
+/**
+ * @brief Exit the current thread, marking it as ZOMBIE and waking up any joiners.
+ * @author Syed Taha
+ */
 void
 thread_exit(void)
 {

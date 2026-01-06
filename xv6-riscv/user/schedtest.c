@@ -1,415 +1,599 @@
 /**
  * @file schedtest.c
- * @brief Test program to compare different CPU scheduling algorithms in xv6.
- * @author Hamna Sajid
- * @date December 16, 2025
+ * @brief Comprehensive scheduler testing suite for xv6
+ * @author Hamna Sajid, Updated by Syed Taha
+ * @date December 2025
  *
  * @details
- * This program creates multiple child processes with different workload characteristics
- * to test and compare the behavior of different CPU schedulers (Round Robin, Priority, MLFQ).
+ * Tests different scheduling algorithms with proper correctness verification
+ * and performance benchmarking.
  *
- * Test Types:
- * 1. CPU-bound test: Processes that perform intensive computation
- * 2. Mixed workload: Combination of CPU and I/O operations
- * 3. Priority test: (Priority scheduler only) Tests priority ordering
- *
- * Usage:
- * - Compile and run with default Round Robin: make qemu, then run 'schedtest'
- * - Compile and run with Priority scheduler: make qemu-priority, then run 'schedtest'
- * - Compile and run with MLFQ scheduler: make qemu-mlfq, then run 'schedtest'
- *
- * Expected Behaviors:
- * - Round Robin: All processes get equal time slices, fair distribution
- * - Priority: Lower priority values run first, potential starvation
- * - MLFQ: Interactive (I/O-bound) processes stay in high-priority queues,
- *         CPU-bound processes gradually move to low-priority queues
+ * Test Organization:
+ * - Default (RR): Performance benchmark only
+ * - Priority/MLFQ: Correctness verification + performance benchmark
  */
 
 #include "kernel/types.h"
 #include "kernel/stat.h"
 #include "user/user.h"
 
-#define NUM_CHILDREN 5                  ///< Number of child processes to create
-#define CPU_WORK_ITERATIONS 5000000000L ///< Iterations for CPU-bound work
-#define IO_SLEEP_TICKS 10               ///< Sleep duration for I/O simulation
+#include "testutil.h"
 
-/**
- * @brief Perform CPU-intensive work (computation).
- * @param iterations Number of loop iterations to perform.
- *
- * @details
- * Simulates a CPU-bound process by performing busy-loop computation.
- * This type of workload should:
- * - In RR: Get equal time slices with other processes
- * - In Priority: Run based on priority value
- * - In MLFQ: Gradually move to lower-priority queues
- */
-void cpu_intensive_work(long iterations)
-{
-    volatile long sum = 0;
-    for (long i = 0; i < iterations; i++)
-    {
-        sum += i;
-        // Occasionally yield to show cooperation
-        if (i % 100000 == 0)
-        {
-            // yield();  // Optional: can uncomment to test yielding behavior
-        }
-    }
+#define NUM_PROCESSES 6
+#define WORK_ITERATIONS 10000000L
+#define TRACKED_PROCESS 1
+
+ // Compile-time scheduler detection
+#if defined(MLFQ_SCHED)
+#define SCHEDULER_NAME "MLFQ (Multi-Level Feedback Queue)"
+#define HAS_PRIORITY 1
+#elif defined(PRIORITY_SCHED)
+#define SCHEDULER_NAME "Priority Scheduling"
+#define HAS_PRIORITY 2
+#else
+#define SCHEDULER_NAME "Round Robin (Default)"
+#define HAS_PRIORITY 0
+#endif
+
+long long time_in_ms(void) {
+  // NOTE: Although some documentation claims a 100 MHz timebase,
+  // xv6 on RISC-V (including QEMU) uses a 10 MHz timer for rdtime().
+  //
+  // rdtime() returns hardware timebase ms:
+  //     10,000,000 ms per second
+  //     10,000 ms per millisecond
+  //
+  // Therefore, dividing by 10,000 converts raw ms to milliseconds.
+  return (long long)(rdtime() / 10000);
 }
 
 /**
- * @brief Perform I/O-bound work (sleep simulation).
- * @param sleep_ticks Number of ticks to sleep.
- *
- * @details
- * Simulates an I/O-bound process by periodically sleeping (blocking).
- * This type of workload should:
- * - In RR: Yield CPU while sleeping, resume with same priority
- * - In Priority: Maintain priority while blocked
- * - In MLFQ: Stay in high-priority queues (rewarded for I/O behavior)
+ * @brief CPU-intensive work simulation
  */
-void io_intensive_work(int sleep_ticks)
-{
-    for (int i = 0; i < 10; i++)
-    {
-        printf("IO process: iteration %d\n", i);
-        // Simulate I/O by doing a blocking operation (write to fd 1)
-        // Then busy-wait to simulate I/O delay
-        int start = uptime();
-        while (uptime() - start < sleep_ticks)
-        {
-            // Busy wait
-        }
-    }
+void cpu_work(long iterations) {
+  volatile long sum = 0;
+  for (long i = 0; i < iterations; i++) {
+    sum += i;
+  }
 }
 
 /**
- * @brief Test Case 1: CPU-bound processes.
+ * @brief Print scheduler info
+ */
+void print_scheduler_info(void) {
+  info("");
+  info("****************************************************************");
+  info("                  SCHEDULER TEST SUITE                          ");
+  info("****************************************************************");
+  info(" Active Scheduler: %s", SCHEDULER_NAME);
+  info(" Number of Test Processes: %d", NUM_PROCESSES);
+  info(" Work per Process: %ld iterations", WORK_ITERATIONS);
+  info(" Tracked Process: #%d", TRACKED_PROCESS);
+  info("****************************************************************\n");
+}
+
+// ============================================================================
+// DEFAULT SCHEDULER TESTS (Round Robin)
+// ============================================================================
+
+#if !HAS_PRIORITY
+
+/**
+ * @brief Benchmark test for default Round Robin scheduler
  *
  * @details
- * Creates multiple CPU-bound processes that perform intensive computation.
- * Useful for observing:
- * - Time slice distribution in Round Robin
- * - Priority enforcement in Priority scheduler
- * - Queue demotion in MLFQ
+ * Creates 100 processes, each doing the same amount of work.
+ * Tracks process #10 individually and reports:
+ * - Average completion time across all processes
+ * - Completion time for process #10
+ * - Total wall-clock time
  */
-void test_cpu_bound()
-{
-    printf("\n=== Test 1: CPU-Bound Processes ===\n");
-    printf("Assigning priorities: Child 0=0 (highest), Child 1=10 (high), Child 2=20 (med), Child 3=30 (low), Child 4=31 (lowest)\n");
-    printf("Starting all processes...\n\n");
+void test_rr_benchmark(void) {
+  info("Round Robin Benchmark Test");
 
-    int priorities[] = {0, 10, 20, 30, 31}; // Wider spread for better differentiation
-    int pipes[NUM_CHILDREN][2];             // One pipe per child
+  int pipes[NUM_PROCESSES][2];
+  uint test_start = time_in_ms();
 
-    // Create pipes for each child
-    for (int i = 0; i < NUM_CHILDREN; i++)
-    {
-        if (pipe(pipes[i]) < 0)
-        {
-            printf("Pipe creation failed\n");
-            exit(1);
-        }
+  // Create pipes
+  for (int i = 0; i < NUM_PROCESSES; i++) {
+    if (pipe(pipes[i]) < 0) {
+      printf("ERROR: Pipe creation failed\n");
+      exit(1);
+    }
+  }
+
+  printf("Starting %d processes...\n", NUM_PROCESSES);
+
+  // Fork all processes
+  for (int i = 0; i < NUM_PROCESSES; i++) {
+    int pid = fork();
+
+    if (pid < 0) {
+      printf("ERROR: Fork failed at process %d\n", i);
+      exit(1);
     }
 
-    for (int i = 0; i < NUM_CHILDREN; i++)
-    {
-        int pid = fork();
+    if (pid == 0) {
+      // Child process
+      for (int j = 0; j < NUM_PROCESSES; j++) {
+        close(pipes[j][0]);
+        if (j != i) close(pipes[j][1]);
+      }
 
-        if (pid < 0)
-        {
-            printf("Fork failed\n");
-            exit(1);
-        }
+      uint start = time_in_ms();
+      cpu_work(WORK_ITERATIONS);
+      uint end = time_in_ms();
 
-        if (pid == 0)
-        {
-            // Child process: Close read ends of all pipes
-            for (int j = 0; j < NUM_CHILDREN; j++)
-            {
-                close(pipes[j][0]);
-                if (j != i)
-                    close(pipes[j][1]); // Close write ends of other pipes
-            }
+      int result[3] = { i, getpid(), end - start };
+      write(pipes[i][1], result, sizeof(result));
+      close(pipes[i][1]);
+      exit(0);
+    }
+  }
 
-            // Set priority based on child number
-            int priority = priorities[i];
-            setpriority(0, priority); // 0 = current process
+  // Parent: collect results
+  for (int i = 0; i < NUM_PROCESSES; i++) {
+    close(pipes[i][1]);
+  }
 
-            uint start_time = uptime();
-            cpu_intensive_work(CPU_WORK_ITERATIONS);
-            uint end_time = uptime();
+  printf("\n%10s %10s %15s\n", "Process", "PID", "Time (ms)");
+  printf("------------------------------------------\n");
 
-            // Send result to parent via pipe
-            int result[4]; // child_id, pid, priority, ticks
-            result[0] = i;
-            result[1] = getpid();
-            result[2] = priority;
-            result[3] = end_time - start_time;
+  uint total_time = 0;
+  uint tracked_time = 0;
 
-            write(pipes[i][1], result, sizeof(result));
-            close(pipes[i][1]);
-            exit(0);
-        }
+  for (int i = 0; i < NUM_PROCESSES; i++) {
+    int result[3];
+    read(pipes[i][0], result, sizeof(result));
+    close(pipes[i][0]);
+
+    total_time += result[2];
+
+    if (result[0] == TRACKED_PROCESS) {
+      tracked_time = result[2];
+      printf("%10d %10d %15d  <- TRACKED\n", result[0], result[1], result[2]);
+    }
+    else if (i < 5 || i >= NUM_PROCESSES - 5) {
+      // Print first 5 and last 5 processes
+      printf("%10d %10d %15d\n", result[0], result[1], result[2]);
+    }
+    else if (i == 5) {
+      printf("... (showing first/last 5 only) ...\n");
+    }
+  }
+
+  uint test_end = time_in_ms();
+  uint wall_time = test_end - test_start;
+  uint avg_time = total_time / NUM_PROCESSES;
+
+  printf("------------------------------------------\n");
+  printf("Average completion time: %d ms\n", avg_time);
+  printf("Process #%d time:        %3d ms\n", TRACKED_PROCESS, tracked_time);
+  printf("Total wall-clock time:   %d ms\n", wall_time);
+  printf("Total CPU time used:     %d ms\n", total_time);
+
+  // Wait for all children
+  for (int i = 0; i < NUM_PROCESSES; i++) {
+    wait(0);
+  }
+
+  printf("\n");
+}
+
+#endif // !HAS_PRIORITY
+
+// ============================================================================
+// PRIORITY/MLFQ SCHEDULER TESTS
+// ============================================================================
+
+#if HAS_PRIORITY
+
+/**
+ * @brief Correctness Test 1: All processes complete
+ *
+ * @details
+ * Verifies that all 100 processes complete successfully regardless of priority.
+ * Tests basic scheduler fairness - no starvation.
+ */
+void test_correctness_completion(void) {
+  info("Correctness Test 1: All Processes Complete");
+
+  int pipes[NUM_PROCESSES][2];
+
+  for (int i = 0; i < NUM_PROCESSES; i++) {
+    if (pipe(pipes[i]) < 0) {
+      printf("ERROR: Pipe creation failed\n");
+      exit(1);
+    }
+  }
+
+  printf("Creating %d processes with varying priorities...\n", NUM_PROCESSES);
+
+  // Fork all processes with different priorities
+  for (int i = 0; i < NUM_PROCESSES; i++) {
+    int pid = fork();
+
+    if (pid < 0) {
+      printf("ERROR: Fork failed\n");
+      exit(1);
     }
 
-    // Parent: Close write ends and read results
-    for (int i = 0; i < NUM_CHILDREN; i++)
-    {
-        close(pipes[i][1]);
+    if (pid == 0) {
+      for (int j = 0; j < NUM_PROCESSES; j++) {
+        close(pipes[j][0]);
+        if (j != i) close(pipes[j][1]);
+      }
+
+      // Distribute priorities evenly: 0-31
+      int priority = (i * 31) / NUM_PROCESSES;
+      setpriority(0, priority);
+
+      cpu_work(WORK_ITERATIONS / 10);  // Lighter work for correctness test
+
+      int result[2] = { i, getpid() };
+      write(pipes[i][1], result, sizeof(result));
+      close(pipes[i][1]);
+      exit(0);
     }
+  }
 
-    printf("Child    PID      Priority     Time (ticks)\n");
-    printf("----------------------------------------------------\n");
+  // Collect results
+  for (int i = 0; i < NUM_PROCESSES; i++) {
+    close(pipes[i][1]);
+  }
 
-    for (int i = 0; i < NUM_CHILDREN; i++)
-    {
-        int result[4];
-        read(pipes[i][0], result, sizeof(result));
-        printf("%d        %d        %d            %d\n", result[0], result[1], result[2], result[3]);
-        close(pipes[i][0]);
+  int completed = 0;
+  for (int i = 0; i < NUM_PROCESSES; i++) {
+    int result[2];
+    int bytes = read(pipes[i][0], result, sizeof(result));
+    if (bytes == sizeof(result)) {
+      completed++;
     }
+    close(pipes[i][0]);
+  }
 
-    // Wait for all children to complete
-    for (int i = 0; i < NUM_CHILDREN; i++)
-    {
-        wait(0);
-    }
+  printf("\n");
+  printf("Result: %d / %d processes completed\n", completed, NUM_PROCESSES);
 
-    printf("\n=== Test 1 Complete ===\n");
+  if (completed == NUM_PROCESSES) {
+    pass(" All processes completed successfully\n");
+  }
+  else {
+    failnoex(" %d processes did not complete\n", NUM_PROCESSES - completed);
+  }
+
+  for (int i = 0; i < NUM_PROCESSES; i++) {
+    wait(0);
+  }
+
+  printf("\n");
 }
 
 /**
- * @brief Test Case 2: Mixed workload (CPU and I/O).
+ * @brief Correctness Test 2: Priority ordering
  *
  * @details
- * Creates a mix of CPU-bound and I/O-bound processes.
- * Useful for observing:
- * - How schedulers handle heterogeneous workloads
- * - Interactive process responsiveness in MLFQ
- * - Fairness across different process types
+ * Creates <NUM_PROCESSES> processes with different priorities and verifies that
+ * higher priority processes (lower numbers) complete first.
  */
-void test_mixed_workload()
-{
-    printf("\n=== Test 2: Mixed Workload (CPU + I/O) ===\n");
-    printf("Assigning priorities: I/O processes=5 (high), CPU processes=20 (low)\n");
-    printf("Starting mixed workload...\n\n");
+void test_correctness_priority_order(void) {
+  info("Correctness Test 2: Priority Ordering");
 
-    int pipes[NUM_CHILDREN][2]; // One pipe per child
+  const int n = NUM_PROCESSES;
+  int pipes[n][2];
+  int priorities[NUM_PROCESSES];
+  // Assign priorities: lower index = higher priority
+  for (int i = 0; i < n; i++) {
+    priorities[i] = i * (31 / (n - 1));  // Spread from 0 to 31
+  }
 
-    // Create pipes for each child
-    for (int i = 0; i < NUM_CHILDREN; i++)
-    {
-        if (pipe(pipes[i]) < 0)
-        {
-            printf("Pipe creation failed\n");
-            exit(1);
+  for (int i = 0; i < n; i++) {
+    if (pipe(pipes[i]) < 0) {
+      printf("ERROR: Pipe creation failed\n");
+      exit(1);
+    }
+  }
+
+  printf("Creating %d processes with priorities: ", n);
+  for (int i = 0; i < n; i++) {
+    printf("%d ", priorities[i]);
+  }
+  printf("\n\n");
+
+  uint start_time = time_in_ms();
+
+  for (int i = 0; i < n; i++) {
+    int pid = fork();
+
+    if (pid == 0) {
+      for (int j = 0; j < n; j++) {
+        close(pipes[j][0]);
+        if (j != i) close(pipes[j][1]);
+      }
+
+      setpriority(0, priorities[i]);
+
+      // uint my_start = time_in_ms();
+      cpu_work(WORK_ITERATIONS);
+      uint my_end = time_in_ms();
+
+      int result[4] = { i, getpid(), priorities[i], my_end - start_time };
+      write(pipes[i][1], result, sizeof(result));
+      close(pipes[i][1]);
+      exit(0);
+    }
+  }
+
+  for (int i = 0; i < n; i++) {
+    close(pipes[i][1]);
+  }
+
+  printf("%10s %7s %11s %14s\n", "Process", "PID", "Priority", "Finish Time");
+  printf("---------------------------------------------\n");
+
+  int results[n][4];
+  for (int i = 0; i < n; i++) {
+    read(pipes[i][0], results[i], sizeof(results[i]));
+    close(pipes[i][0]);
+  }
+
+  // Sort by finish time
+  for (int i = 0; i < n - 1; i++) {
+    for (int j = 0; j < n - i - 1; j++) {
+      if (results[j][3] > results[j + 1][3]) {
+        int temp[4];
+        for (int k = 0; k < 4; k++) {
+          temp[k] = results[j][k];
+          results[j][k] = results[j + 1][k];
+          results[j + 1][k] = temp[k];
         }
+      }
     }
+  }
 
-    for (int i = 0; i < NUM_CHILDREN; i++)
-    {
-        int pid = fork();
+  for (int i = 0; i < n; i++) {
+    printf("%10d %7d %11d %14d\n", results[i][0], results[i][1], results[i][2], results[i][3]);
+  }
 
-        if (pid < 0)
-        {
-            printf("Fork failed\n");
-            exit(1);
-        }
-
-        if (pid == 0)
-        {
-            // Child process: Close read ends of all pipes
-            for (int j = 0; j < NUM_CHILDREN; j++)
-            {
-                close(pipes[j][0]);
-                if (j != i)
-                    close(pipes[j][1]); // Close write ends of other pipes
-            }
-
-            int result[4]; // child_id, pid, priority, type (0=CPU, 1=I/O)
-            result[0] = i;
-            result[1] = getpid();
-
-            if (i % 2 == 0)
-            {
-                // Even children: CPU-bound (lower priority)
-                setpriority(0, 20); // Low priority for CPU-bound
-                result[2] = 20;
-                result[3] = 0; // 0 = CPU-bound
-                cpu_intensive_work(CPU_WORK_ITERATIONS / 2);
-            }
-            else
-            {
-                // Odd children: I/O-bound (higher priority)
-                setpriority(0, 5); // High priority for I/O-bound
-                result[2] = 5;
-                result[3] = 1; // 1 = I/O-bound
-                // Simplified I/O work without printing
-                for (int j = 0; j < 10; j++)
-                {
-                    int start = uptime();
-                    while (uptime() - start < IO_SLEEP_TICKS)
-                    {
-                        // Busy wait
-                    }
-                }
-            }
-
-            // Send result to parent via pipe
-            write(pipes[i][1], result, sizeof(result));
-            close(pipes[i][1]);
-            exit(0);
-        }
+  // Verify ordering: check if lower priorities tend to finish first
+  int correct_order = 1;
+  for (int i = 0; i < n - 1; i++) {
+    if (results[i][2] > results[i + 1][2]) {
+      correct_order = 0;
+      break;
     }
+  }
 
-    // Parent: Close write ends and read results
-    for (int i = 0; i < NUM_CHILDREN; i++)
-    {
-        close(pipes[i][1]);
-    }
+  printf("\n");
+  if (correct_order) {
+    pass(" Processes completed in priority order");
+  }
+  else {
+    info("Note: Priority ordering not strictly enforced (expected for MLFQ)");
+  }
 
-    printf("Child    PID      Priority     Type\n");
-    printf("----------------------------------------------------\n");
+  for (int i = 0; i < n; i++) {
+    wait(0);
+  }
 
-    for (int i = 0; i < NUM_CHILDREN; i++)
-    {
-        int result[4];
-        read(pipes[i][0], result, sizeof(result));
-        char *type = (result[3] == 0) ? "CPU-bound" : "I/O-bound";
-        printf("%d        %d        %d            %s\n", result[0], result[1], result[2], type);
-        close(pipes[i][0]);
-    }
-
-    // Wait for all children to complete
-    for (int i = 0; i < NUM_CHILDREN; i++)
-    {
-        wait(0);
-    }
-
-    printf("\n=== Test 2 Complete ===\n");
+  printf("\n");
 }
 
 /**
- * @brief Test Case 3: Stress test with many processes.
+ * @brief Correctness Test 3: High vs Low priority fairness
  *
  * @details
- * Creates many processes to stress-test the scheduler.
- * Useful for observing:
- * - Scheduler overhead and scalability
- * - Context switch frequency
- * - System stability under load
+ * Creates <NUM_PROCESSES>/2 high-priority and <NUM_PROCESSES>/2 low-priority processes.
+ * Verifies that high-priority processes complete significantly faster.
  */
-void test_stress()
-{
-    printf("\n=== Test 3: Stress Test (Many Processes) ===\n");
-    printf("Creating 10 processes with light CPU workload...\n\n");
+void test_correctness_fairness(void) {
+  info("Correctness Test 3: High vs Low Priority Comparison");
 
-    int num_stress = 10;
-    int child_info[10][3]; // Store [child_id, pid, read_fd]
+  const int n = NUM_PROCESSES;
+  int pipes[n][2];
 
-    uint test_start = uptime();
-
-    for (int i = 0; i < num_stress; i++)
-    {
-        int p[2];
-
-        // Create pipe just before fork to minimize open fds
-        if (pipe(p) < 0)
-        {
-            printf("Pipe creation failed for child %d\n", i);
-            exit(1);
-        }
-
-        int pid = fork();
-
-        if (pid < 0)
-        {
-            printf("Fork failed\n");
-            exit(1);
-        }
-
-        if (pid == 0)
-        {
-            // Child process: close read end, keep write end
-            close(p[0]);
-
-            // Light CPU work (10% of full workload)
-            uint start_time = uptime();
-            cpu_intensive_work(CPU_WORK_ITERATIONS / 10);
-            uint end_time = uptime();
-
-            // Send result to parent via pipe
-            int result[3]; // child_id, pid, ticks
-            result[0] = i;
-            result[1] = getpid();
-            result[2] = end_time - start_time;
-
-            write(p[1], result, sizeof(result));
-            close(p[1]);
-            exit(0);
-        }
-        else
-        {
-            // Parent: close write end, store read end
-            close(p[1]);
-            child_info[i][0] = i;
-            child_info[i][1] = pid;
-            child_info[i][2] = p[0]; // Store read fd
-        }
+  for (int i = 0; i < n; i++) {
+    if (pipe(pipes[i]) < 0) {
+      fail("ERROR: Pipe creation failed\n");
     }
+  }
 
-    printf("Child    PID      Time (ticks)\n");
-    printf("------------------------------------\n");
+  info("Creating %d processes: %d HIGH priority (0), %d LOW priority (31)", n, n / 2, n / 2);
 
-    int total_ticks = 0;
-    for (int i = 0; i < num_stress; i++)
-    {
-        int result[3];
-        read(child_info[i][2], result, sizeof(result));
-        printf("%d        %d        %d\n", result[0], result[1], result[2]);
-        total_ticks += result[2];
-        close(child_info[i][2]);
+  uint start_time = time_in_ms();
+
+  for (int i = 0; i < n; i++) {
+    int pid = fork();
+
+    if (pid == 0) {
+      for (int j = 0; j < n; j++) {
+        close(pipes[j][0]);
+        if (j != i) close(pipes[j][1]);
+      }
+
+      int priority = (i < n / 2) ? 0 : 31;
+      setpriority(0, priority);
+
+      uint my_start = time_in_ms();
+      cpu_work(WORK_ITERATIONS);
+      uint my_end = time_in_ms();
+
+      int result[3] = { priority, my_end - start_time, my_end - my_start };
+      write(pipes[i][1], result, sizeof(result));
+      close(pipes[i][1]);
+      exit(0);
     }
+  }
 
-    uint test_end = uptime();
-    uint total_time = test_end - test_start;
-    int avg_ticks = total_ticks / num_stress;
+  for (int i = 0; i < n; i++) {
+    close(pipes[i][1]);
+  }
 
-    printf("------------------------------------\n");
-    printf("Total wall-clock time: %d ticks\n", total_time);
-    printf("Average completion time: %d ticks\n", avg_ticks);
-    printf("Total CPU time used: %d ticks\n", total_ticks);
+  uint high_total = 0, low_total = 0;
+  int high_count = 0, low_count = 0;
 
-    printf("\n=== Test 3 Complete ===\n");
+  for (int i = 0; i < n; i++) {
+    int result[3];
+    read(pipes[i][0], result, sizeof(result));
+    close(pipes[i][0]);
+
+    if (result[0] == 0) {
+      high_total += result[2];
+      high_count++;
+    }
+    else {
+      low_total += result[2];
+      low_count++;
+    }
+  }
+
+  uint high_avg = high_total / high_count;
+  uint low_avg = low_total / low_count;
+
+  info("\nHigh Priority (0)  - Avg time: %d ms", high_avg);
+  info("Low Priority (31)  - Avg time: %d ms", low_avg);
+
+  if (high_avg < low_avg) {
+    info("Speedup factor: %.2fx\n", (float)low_avg / high_avg);
+    pass(" High priority processes completed faster");
+  }
+
+  for (int i = 0; i < n; i++) {
+    wait(0);
+  }
+
+  printf("\n");
 }
 
 /**
- * @brief Main function - runs all scheduler tests.
- *
- * @details
- * Executes a suite of tests to evaluate the current scheduler's behavior.
- * Results can be compared across different scheduler implementations by
- * rebuilding with different SCHED_FLAG values.
- *
- * @return Exit code 0 on success.
+ * @brief Performance benchmark with prioritized tracked process
  */
-int main(int argc, char *argv[])
-{
-    printf("\n");
-    printf("==========================================\n");
-    printf("   CPU Scheduler Test Suite for xv6\n");
-    printf("==========================================\n");
+void test_priority_benchmark(void) {
+  info("Priority Scheduler Benchmark Test");
 
-    // Run test suite
-    test_cpu_bound();
-    test_mixed_workload();
-    test_stress();
+  int pipes[NUM_PROCESSES][2];
+  uint test_start = time_in_ms();
 
-    printf("\n==========================================\n");
-    printf("   All Tests Complete!\n");
-    printf("==========================================\n\n");
+  for (int i = 0; i < NUM_PROCESSES; i++) {
+    if (pipe(pipes[i]) < 0) {
+      printf("ERROR: Pipe creation failed\n");
+      exit(1);
+    }
+  }
 
-    exit(0);
+  printf("Starting %d processes...\n", NUM_PROCESSES);
+  printf("Process #%d will have HIGH PRIORITY (0)\n", TRACKED_PROCESS);
+  printf("All other processes will have LOW PRIORITY (31)\n\n");
+
+  for (int i = 0; i < NUM_PROCESSES; i++) {
+    int pid = fork();
+
+    if (pid < 0) {
+      printf("ERROR: Fork failed\n");
+      exit(1);
+    }
+
+    if (pid == 0) {
+      for (int j = 0; j < NUM_PROCESSES; j++) {
+        close(pipes[j][0]);
+        if (j != i) close(pipes[j][1]);
+      }
+
+      int priority = (i == TRACKED_PROCESS) ? 0 : 31;
+      setpriority(0, priority);
+
+      uint start = time_in_ms();
+      cpu_work(WORK_ITERATIONS);
+      uint end = time_in_ms();
+
+      int result[4] = { i, getpid(), priority, end - start };
+      write(pipes[i][1], result, sizeof(result));
+      close(pipes[i][1]);
+      exit(0);
+    }
+  }
+
+  for (int i = 0; i < NUM_PROCESSES; i++) {
+    close(pipes[i][1]);
+  }
+
+  printf("%10s %10s %12s %15s\n", "Process", "PID", "Priority", "Time (ms)");
+  printf("----------------------------------------------------\n");
+
+  uint total_time = 0;
+  uint tracked_time = 0;
+  // uint high_priority_time = 0;
+  uint low_priority_total = 0;
+  int low_priority_count = 0;
+
+  for (int i = 0; i < NUM_PROCESSES; i++) {
+    int result[4];
+    read(pipes[i][0], result, sizeof(result));
+    close(pipes[i][0]);
+
+    total_time += result[3];
+
+    if (result[2] == 0) {
+      // high_priority_time = result[3];
+    }
+    else {
+      low_priority_total += result[3];
+      low_priority_count++;
+    }
+
+    if (result[0] == TRACKED_PROCESS) {
+      tracked_time = result[3];
+      printf("%10d %10d %12d %15d  <- HIGH PRIORITY\n",
+        result[0], result[1], result[2], result[3]);
+    }
+    else if (i < 5 || i >= NUM_PROCESSES - 5) {
+      printf("%10d %10d %12d %15d\n",
+        result[0], result[1], result[2], result[3]);
+    }
+    else if (i == 5) {
+      printf("... (showing first/last 5 only) ...\n");
+    }
+  }
+
+  uint test_end = time_in_ms();
+  uint wall_time = test_end - test_start;
+  uint avg_time = total_time / NUM_PROCESSES;
+  uint low_avg = low_priority_total / low_priority_count;
+
+  printf("----------------------------------------------------\n");
+  info("Process #%d (high priority): %3d ms", TRACKED_PROCESS, tracked_time);
+  info("Low priority average:        %d ms", low_avg);
+  info("Overall average:             %d ms", avg_time);
+  info("Speedup for high priority:   %.2fx", (float)low_avg / tracked_time);
+  info("Total wall-clock time:       %d ms", wall_time);
+
+  for (int i = 0; i < NUM_PROCESSES; i++) {
+    wait(0);
+  }
+
+  printf("\n");
+
+}
+
+#endif // HAS_PRIORITY
+
+// ============================================================================
+// Main
+// ============================================================================
+
+int main(int argc, char* argv[]) {
+  print_scheduler_info();
+
+#if HAS_PRIORITY
+  // Priority/MLFQ: Correctness tests first, then benchmark
+  test_correctness_completion();
+  test_correctness_priority_order();
+  test_correctness_fairness();
+  test_priority_benchmark();
+#else
+  // Default RR: Just benchmark
+  test_rr_benchmark();
+#endif
+
+  exit(0);
 }

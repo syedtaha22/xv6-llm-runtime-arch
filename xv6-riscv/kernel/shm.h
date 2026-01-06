@@ -25,8 +25,6 @@
 #include "types.h"
 
 // Shared memory constants
-/** @brief Maximum number of shared memory segments in the system. */
-#define NSHM 16
 /** @brief Maximum length of shared memory segment names. */
 #define SHM_NAME_LEN 32
 /** @brief Maximum pages per shared memory segment (~70MB with 4KB pages). */
