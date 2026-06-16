@@ -1,5 +1,5 @@
 /**
- * @file run.c
+ * @file llama.c
  * @brief Pure C llama inference program integrated with xv6 userland and persistent shared memory caching.
  *
  * @author Hadiya Muneeb
@@ -84,44 +84,13 @@ typedef uint32 size_t;
 void* GLOBAL_WEIGHTS_PTR = NULL; // global pointer to the model weights in shared memory
 void* GLOBAL_TOKENIZER_PTR = NULL; // global pointer to the tokenizer data in shared memory
 
-// ----------------------------------------------------------------------------
-// utilities: time
-
-long time_in_ms(void) {
-  return (long)(rdtime() / 100000); // 100 MHz = 100,000,000 cycles/sec
-}
-
-
-/**
- * @brief Update peak RAM usage if current usage is higher.
- */
-void update_peak_ram(void) {
-  perf_update_peak_ram();
-}
-
-/**
- * @brief Math function wrappers with call counting.
- */
- // Redefine math macros to use xmath functions directly
-#undef sqrtf
-#define sqrtf xsqrtf
-#undef expf
-#define expf xexpf
-#undef powf
-#define powf xpowf
-#undef cosf
-#define cosf xcosf
-#undef sinf
-#define sinf xsinf
-#undef abs
-#define abs xfabsf
-#undef floorf
-#define floorf xfloorf
+void shutdown_thread_pool(void);
 
 /**
  * @brief Print performance metrics.
  */
 void release_and_exit(int code) {
+  shutdown_thread_pool();
   // clean up any global state here if needed
   shmdt(GLOBAL_WEIGHTS_PTR);
   shmdt(GLOBAL_TOKENIZER_PTR);
@@ -156,25 +125,25 @@ void* fetch_if_not_cached(const char* segment_name, int expected_size, char* (*f
   if (shmid >= 0) {
     shmaddr = shmat(shmid, 0, SHM_RDONLY);
     if (shmaddr == (void*)-1) {
-      failnoex(1, "Failed to attach to existing shared memory segment");
+      failnoex(" Failed to attach to existing shared memory segment");
       return 0;
     }
-    pass(1, "Cached data found (segment: %s, ID: %d). Ready for use.", segment_name, shmid);
+    pass(" Cached data found (segment: %s, ID: %d). Ready for use.", segment_name, shmid);
     return shmaddr;
   }
 
   // Segment not found → fetch from server
-  info(1, "No cached data found for %s. Fetching from server...", segment_name);
+  info(" No cached data found for %s. Fetching from server...", segment_name);
   data_buffer = fetch_fn(&size);
   if (!data_buffer || size != expected_size) {
-    failnoex(1, "Failed to fetch %s or size mismatch (got %d, expected %d)", segment_name, size, expected_size);
+    failnoex(" Failed to fetch %s or size mismatch (got %d, expected %d)", segment_name, size, expected_size);
     return 0;
   }
 
   // Create persistent shared memory segment
   shmid = shmget(segment_name, size, IPC_CREAT | SHM_PERSIST);
   if (shmid < 0) {
-    failnoex(1, "Failed to create shared memory segment for %s", segment_name);
+    failnoex(" Failed to create shared memory segment for %s", segment_name);
     free(data_buffer);
     return 0;
   }
@@ -182,7 +151,7 @@ void* fetch_if_not_cached(const char* segment_name, int expected_size, char* (*f
   // Attach and copy data
   shmaddr = shmat(shmid, 0, SHM_RDWR);
   if (shmaddr == (void*)-1) {
-    failnoex(1, "Failed to attach to newly created shared memory segment");
+    failnoex(" Failed to attach to newly created shared memory segment");
     free(data_buffer);
     return 0;
   }
@@ -190,67 +159,411 @@ void* fetch_if_not_cached(const char* segment_name, int expected_size, char* (*f
   memcpy(shmaddr, data_buffer, size);
   free(data_buffer);
 
-  pass(1, "%s fetched and cached in shared memory (ID: %d).\n", segment_name, shmid);
+  pass(" %s fetched and cached in shared memory (ID: %d).\n", segment_name, shmid);
   return shmaddr;
 }
 
 
-// ----------------------------------------------------------------------------
-// Transformer model
+// ------------------------------------------------------------------------------
+// Data Structures for Model (Pre-declared for threading)
+// ------------------------------------------------------------------------------
 
 typedef struct {
-  int dim; // transformer dimension
-  int hidden_dim; // for ffn layers
-  int n_layers; // number of layers
-  int n_heads; // number of query heads
-  int n_kv_heads; // number of key/value heads (can be < query heads because of multiquery)
-  int vocab_size; // vocabulary size, usually 256 (byte-level)
-  int seq_len; // max sequence length
+  int dim;
+  int hidden_dim;
+  int n_layers;
+  int n_heads;
+  int n_kv_heads;
+  int vocab_size;
+  int seq_len;
 } Config;
 
 typedef struct {
-  // token embedding table
-  float* token_embedding_table;    // (vocab_size, dim)
-  // weights for rmsnorms
-  float* rms_att_weight; // (layer, dim) rmsnorm weights
-  float* rms_ffn_weight; // (layer, dim)
-  // weights for matmuls. note dim == n_heads * head_size
-  float* wq; // (layer, dim, n_heads * head_size)
-  float* wk; // (layer, dim, n_kv_heads * head_size)
-  float* wv; // (layer, dim, n_kv_heads * head_size)
-  float* wo; // (layer, n_heads * head_size, dim)
-  // weights for ffn
-  float* w1; // (layer, hidden_dim, dim)
-  float* w2; // (layer, dim, hidden_dim)
-  float* w3; // (layer, hidden_dim, dim)
-  // final rmsnorm
-  float* rms_final_weight; // (dim,)
-  // (optional) classifier weights for the logits, on the last layer
+  float* token_embedding_table;
+  float* rms_att_weight;
+  float* rms_ffn_weight;
+  float* wq;
+  float* wk;
+  float* wv;
+  float* wo;
+  float* w1;
+  float* w2;
+  float* w3;
+  float* rms_final_weight;
   float* wcls;
 } TransformerWeights;
 
 typedef struct {
-  // current wave of activations
-  float* x; // activation at current time stamp (dim,)
-  float* xb; // same, but inside a residual branch (dim,)
-  float* xb2; // an additional buffer just for convenience (dim,)
-  float* hb; // buffer for hidden dimension in the ffn (hidden_dim,)
-  float* hb2; // buffer for hidden dimension in the ffn (hidden_dim,)
-  float* q; // query (dim,)
-  float* k; // key (dim,)
-  float* v; // value (dim,)
-  float* att; // buffer for scores/attention values (n_heads, seq_len)
-  float* logits; // output logits
-  // kv cache
-  float* key_cache;   // (layer, seq_len, dim)
-  float* value_cache; // (layer, seq_len, dim)
+  float* x;
+  float* xb;
+  float* xb2;
+  float* hb;
+  float* hb2;
+  float* q;
+  float* k;
+  float* v;
+  float* att;
+  float* logits;
+  float* key_cache;
+  float* value_cache;
 } RunState;
 
+// ------------------------------------------------------------------------------
+// Thread Pool for Parallel Execution (MatMul + Attention)
+// ------------------------------------------------------------------------------
+
+// Task Types
+typedef enum {
+    TASK_NONE = 0,
+    TASK_MATMUL = 1,
+    TASK_ATTENTION = 2
+} TaskType;
+
+/**
+ * @brief Matmul Work Item
+ */
 typedef struct {
-  Config config; // the hyperparameters of the architecture (the blueprint)
-  TransformerWeights weights; // the weights of the model
-  RunState state; // buffers for the "wave" of activations in the forward pass
-  // some more state needed to properly clean up the memory mapping (sigh)
+    float* xout;
+    float* x;
+    float* w;
+    int n;
+    int d;
+    int start_row;
+    int end_row;
+} MatmulWork; 
+
+/**
+ * @brief Attention Work Item
+ */
+typedef struct {
+    RunState* s;
+    Config* p;
+    TransformerWeights* w;
+    unsigned long long layer;
+    int pos;
+    int head_start;
+    int head_end;
+} AttentionWork;
+
+
+/**
+ * @brief Structure representing a thread pool worker.
+ * Each worker maintains its thread ID, associated work item,
+ * exit flag, and function pointer for the specific worker implementation.
+ * 
+ * @param thread_id Unique identifier for the thread.
+ * @param task_type Type of task assigned to the worker (TaskType enum).
+ * @param mm_work Pointer to the Matmul work item.
+ * @param att_work Pointer to the Attention work item.
+ * @param work_ready Pointer to the flag indicating if work is ready.
+ * @param work_done Pointer to the flag indicating if work is done.
+ * @param should_exit Pointer to the flag indicating if the worker should exit.
+ * 
+ * @author Hadiya Muneeb
+ */
+typedef struct {
+    int thread_id;
+    
+    // Task definition
+    volatile int task_type; // TaskType enum
+    MatmulWork* mm_work;
+    AttentionWork* att_work;
+
+    // Synchronization flags
+    volatile int* work_ready;
+    volatile int* work_done;
+    volatile int* should_exit;
+} ThreadPoolWorker;
+
+// Global thread pool state. @todo encapsulate in a struct if needed.
+static int thread_pool_initialized = 0;       /// @brief Flag indicating if the thread pool is initialized
+static int* thread_ids = NULL;                /// @brief Array of thread IDs
+static volatile int* work_ready = NULL;       /// @brief Array of work ready flags
+static volatile int* work_done = NULL;        /// @brief Array of work done flags
+static ThreadPoolWorker** worker_ptrs = NULL; /// @brief Array of pointers to ThreadPoolWorker structs
+static volatile int thread_pool_exit = 0;     /// @brief Flag to signal thread pool shutdown
+static volatile int g_num_threads = 3;        /// @brief Number of threads in the pool
+
+
+// Work Item Storage
+static MatmulWork* mm_work_items = NULL;
+static AttentionWork* att_work_items = NULL;
+
+// Forward decls
+void softmax(float* x, int size);
+
+/**
+ * @brief Unrolled dot-product computation for better performance.
+ * Uses a loop unrolling factor of 8.
+ * 
+ * @author Hadiya Muneeb
+ * 
+ * @param w_row Pointer to the weight row.
+ * @param x Pointer to the input vector.
+ * @param n Length of the vectors.
+ * @return float Result of the dot product.
+ */
+static inline float dot_product_unrolled(float* w_row, float* x, int n) {
+    float sum0 = 0.0f, sum1 = 0.0f, sum2 = 0.0f, sum3 = 0.0f;
+    float sum4 = 0.0f, sum5 = 0.0f, sum6 = 0.0f, sum7 = 0.0f;
+    
+    int j = 0;
+    int n8 = n & ~7;
+    
+    for (; j < n8; j += 8) {
+        sum0 += w_row[j] * x[j];
+        sum1 += w_row[j + 1] * x[j + 1];
+        sum2 += w_row[j + 2] * x[j + 2];
+        sum3 += w_row[j + 3] * x[j + 3];
+        sum4 += w_row[j + 4] * x[j + 4];
+        sum5 += w_row[j + 5] * x[j + 5];
+        sum6 += w_row[j + 6] * x[j + 6];
+        sum7 += w_row[j + 7] * x[j + 7];
+    }
+    
+    float sum_tail = 0.0f;
+    for (; j < n; j++) {
+        sum_tail += w_row[j] * x[j];
+    }
+    
+    return (sum0 + sum1 + sum2 + sum3) + (sum4 + sum5 + sum6 + sum7) + sum_tail;
+}
+
+/**
+ * @brief Dedicated worker for processing attention heads.
+ */
+static void worker_do_attention(AttentionWork* work) {
+    // Extract context
+    RunState* s = work->s;
+    Config* p = work->p;
+    // TransformerWeights* w = work->w; // Unused in this specific kernel part
+    int layer = work->layer;
+    int pos = work->pos;
+
+    int head_size = p->dim / p->n_heads;
+    int kv_dim = (p->dim * p->n_kv_heads) / p->n_heads;
+    int kv_mul = p->n_heads / p->n_kv_heads;
+    int loff = layer * p->seq_len * kv_dim;
+
+    // Iterate assigned heads
+    for (int h = work->head_start; h < work->head_end; h++) {
+        // --- 1. Score Calculation (Q * K) ---
+        float* q = s->q + h * head_size;
+        float* att = s->att + h * p->seq_len;
+        
+        for (int t = 0; t <= pos; t++) {
+            float* k = s->key_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
+            // Use unrolled dot product optimization
+            float score = dot_product_unrolled(q, k, head_size);
+            score /= sqrtf(head_size);
+            att[t] = score;
+        }
+
+        // --- 2. Softmax ---
+        // Operates on the time dimension, safe to do per-head
+        softmax(att, pos + 1);
+
+        // --- 3. Weighted Sum (Att * V) ---
+        float* xb = s->xb + h * head_size;
+        // Zero output buffer
+        for(int i=0; i<head_size; i++) xb[i] = 0.0f;
+        
+        for (int t = 0; t <= pos; t++) {
+            float* v = s->value_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
+            float a = att[t];
+            for (int i = 0; i < head_size; i++) {
+                xb[i] += a * v[i];
+            }
+        }
+    }
+}
+
+/**
+ * @brief Universal Worker Thread
+ * Waits for signal, checks task type, executes, signals done.
+ */
+void universal_worker_thread(void* arg) {
+    ThreadPoolWorker* worker = (ThreadPoolWorker*)arg;
+    
+    while (!(*worker->should_exit)) {
+        // Spin-wait with yield
+        while (!(*worker->work_ready) && !(*worker->should_exit)) {
+            yield(); 
+        }
+
+        if (*worker->should_exit) break;
+
+        if (worker->task_type == TASK_MATMUL) {
+            MatmulWork* work = worker->mm_work;
+            for (int i = work->start_row; i < work->end_row; i++) {
+                float* w_row = &work->w[i * work->n];
+                work->xout[i] = dot_product_unrolled(w_row, work->x, work->n);
+            }
+        } 
+        else if (worker->task_type == TASK_ATTENTION) {
+            worker_do_attention(worker->att_work);
+        }
+
+        // Signal completion
+        *worker->work_done = 1;
+        *worker->work_ready = 0;
+    }
+    thread_exit();
+}
+
+/**
+ * @brief Initialize the thread pool (called once at startup)
+ */
+void init_thread_pool(void) {
+    // If already initialized, do nothing
+    if (thread_pool_initialized) return;
+
+    // Reset exit flag
+    thread_pool_exit = 0;
+
+    // Allocate arrays
+    int n = g_num_threads;
+
+    thread_ids = malloc(sizeof(int) * n);
+    mm_work_items = malloc(sizeof(MatmulWork) * n);
+    att_work_items = malloc(sizeof(AttentionWork) * n); // Alloc attn work
+    work_ready = malloc(sizeof(volatile int) * n);
+    work_done = malloc(sizeof(volatile int) * n);
+    worker_ptrs = malloc(sizeof(ThreadPoolWorker*) * n);
+
+    if (!thread_ids || !mm_work_items || !att_work_items || !worker_ptrs) {
+        eprintf("thread pool malloc failed\n");
+        release_and_exit(EXIT_FAILURE);
+    }
+
+    for (int t = 0; t < n; t++) {
+        work_ready[t] = 0;
+        work_done[t] = 0;
+
+        // Allocate and initialize worker struct
+        ThreadPoolWorker* worker = malloc(sizeof(ThreadPoolWorker));
+        if (!worker) {
+            eprintf("worker malloc failed\n");
+            release_and_exit(EXIT_FAILURE);
+        }
+
+        // Initialize worker fields
+        // User references so that modifying the global flags
+        // Directly affects the worker threads
+        worker->thread_id = t;
+        worker->mm_work = &mm_work_items[t];
+        worker->att_work = &att_work_items[t];
+        worker->should_exit = &thread_pool_exit;
+        worker->work_ready = &work_ready[t];
+        worker->work_done = &work_done[t];
+        
+        worker_ptrs[t] = worker;
+
+        thread_ids[t] = thread_create(universal_worker_thread, worker);
+    }
+    thread_pool_initialized = 1;
+} 
+
+/**
+ * @brief Shutdown the thread pool (called at program exit)
+ * @author Hadiya Muneeb
+ */
+void shutdown_thread_pool(void) {
+    if (!thread_pool_initialized) return;
+
+    // Signal threads to exit
+    thread_pool_exit = 1;
+
+    for (int t = 0; t < g_num_threads; t++) {
+        // Waiting for threads to exit...
+        if (thread_ids && thread_ids[t] > 0) thread_join(thread_ids[t]);
+    }
+
+    for (int t = 0; t < g_num_threads; t++) free(worker_ptrs[t]);
+    free(worker_ptrs);
+    free(thread_ids);
+    free(mm_work_items);
+    free(att_work_items);
+    free((void*)work_ready);
+    free((void*)work_done);
+    thread_pool_initialized = 0;
+} 
+
+/**
+ * @brief Optimized parallel matrix multiplication
+ * 
+ * Key optimizations:
+ * - Reuses pre-created thread pool
+ * - Distributes work in cache-friendly chunks
+ * - Minimizes synchronization overhead
+ * - Better load balancing
+ * 
+ * @param xout Output vector (d,)
+ * @param x Input vector (n,)
+ * @param w Weight matrix (d, n)
+ * @param n Number of columns in w
+ * @param d Number of rows in w
+ */
+void matmul(float* xout, float* x, float* w, int n, int d) {
+    perf_start_function("matmul");
+    
+    // Fallback for small matrices or uninitialized pool
+    if (d < 128 || !thread_pool_initialized) {
+        for (int i = 0; i < d; i++) {
+            float val = 0.0f;
+            float* w_row = &w[i * n];
+            for (int j = 0; j < n; j++) {
+                val += w_row[j] * x[j];
+            }
+            xout[i] = val;
+        }
+        perf_end_function("matmul");
+        return;
+    }
+  
+    // Thread distribution logic
+    int rows_per_thread = (d + g_num_threads - 1) / g_num_threads;
+    // Align to 16 floats (cache line friendly)
+    rows_per_thread = ((rows_per_thread + 15) / 16) * 16; 
+
+    int num_active_threads = (d + rows_per_thread - 1) / rows_per_thread;
+    if (num_active_threads > g_num_threads) num_active_threads = g_num_threads;
+
+    for (int t = 0; t < num_active_threads; t++) {
+        int start_row = t * rows_per_thread;
+        int end_row = start_row + rows_per_thread;
+        if (end_row > d) end_row = d;
+        if (start_row >= d) break;
+
+        mm_work_items[t].xout = xout;
+        mm_work_items[t].x = x;
+        mm_work_items[t].w = w;
+        mm_work_items[t].n = n;
+        mm_work_items[t].d = d;
+        mm_work_items[t].start_row = start_row;
+        mm_work_items[t].end_row = end_row;
+        
+        worker_ptrs[t]->task_type = TASK_MATMUL; // Set Task Type
+        
+        work_done[t] = 0;
+        work_ready[t] = 1;
+    }
+
+    for (int t = 0; t < num_active_threads; t++) {
+        while (!work_done[t]) { yield(); }
+    }
+    
+    perf_end_function("matmul");
+}
+
+// ----------------------------------------------------------------------------
+// Model Structure & Logic
+// ----------------------------------------------------------------------------
+
+typedef struct {
+  Config config; 
+  TransformerWeights weights; 
+  RunState state; 
 } Transformer;
 
 void malloc_run_state(RunState* s, Config* p) {
@@ -317,7 +630,6 @@ void memory_map_weights(TransformerWeights* w, Config* p, float* ptr, int shared
   ptr += p->seq_len * head_size / 2; // skip what used to be freq_cis_imag (for RoPE)
   w->wcls = shared_weights ? w->token_embedding_table : ptr;
 }
-// read_checkpoint removed
 
 /**
  * @brief Initialize Transformer model using weights stored in shared memory.
@@ -377,7 +689,6 @@ void rmsnorm(float* o, float* x, float* weight, int size) {
 }
 
 void softmax(float* x, int size) {
-  perf_start_function("softmax");
   // find max value (for numerical stability)
   float max_val = x[0];
   for (int i = 1; i < size; i++) {
@@ -395,24 +706,72 @@ void softmax(float* x, int size) {
   for (int i = 0; i < size; i++) {
     x[i] /= sum;
   }
-  perf_end_function("softmax");
 }
 
-void matmul(float* xout, float* x, float* w, int n, int d) {
-  perf_start_function("matmul");
-  // W (d,n) @ x (n,) -> xout (d,)
-  // by far the most amount of time is spent inside this little function
-  int i;
-  // #pragma omp parallel for private(i)
-  for (i = 0; i < d; i++) {
-    float val = 0.0f;
-    for (int j = 0; j < n; j++) {
-      val += w[i * n + j] * x[j];
-    }
-    xout[i] = val;
+/**
+ * @brief Hybrid Parallel Multi-Head Attention
+ * Uses static head partitioning. If pos < 32, runs sequentially.
+ * If pos >= 32, dispatches to worker pool.
+ * 
+ * @param s Pointer to the current run state.
+ * @param p Pointer to the model configuration.
+ * @param w Pointer to the model weights.
+ * @param l Current layer index.
+ * @param pos Current position in the sequence.
+ */
+static void multihead_attention(RunState* s, Config* p, TransformerWeights* w, unsigned long long l, int pos) {
+  perf_start_function("multihead_attention");
+
+  // HYBRID CHECK: If sequence is short, overhead > gain. Run sequentially.
+  if (pos < 32 || !thread_pool_initialized) {
+      // Create a temporary "work" item on stack and run it directly
+      // This reuses the exact same logic as the workers
+      AttentionWork seq_work = {
+          .s = s, .p = p, .w = w, 
+          .layer = l, .pos = pos, 
+          .head_start = 0, .head_end = p->n_heads
+      };
+      worker_do_attention(&seq_work);
+      perf_end_function("multihead_attention");
+      return;
   }
-  perf_end_function("matmul");
+
+  // PARALLEL DISPATCH
+  
+  int heads_per_thread = (p->n_heads + g_num_threads - 1) / g_num_threads;
+  int num_active_threads = (p->n_heads + heads_per_thread - 1) / heads_per_thread;
+  if (num_active_threads > g_num_threads) num_active_threads = g_num_threads;
+
+  for (int t = 0; t < num_active_threads; t++) {
+      int start = t * heads_per_thread;
+      int end = start + heads_per_thread;
+      if (end > p->n_heads) end = p->n_heads;
+      if (start >= p->n_heads) break;
+
+      att_work_items[t].s = s;
+      att_work_items[t].p = p;
+      att_work_items[t].w = w;
+      att_work_items[t].layer = l;
+      att_work_items[t].pos = pos;
+      att_work_items[t].head_start = start;
+      att_work_items[t].head_end = end;
+
+      worker_ptrs[t]->task_type = TASK_ATTENTION;
+      
+      work_done[t] = 0;
+      work_ready[t] = 1; // Signal
+  }
+
+  // Synchronization
+  for (int t = 0; t < num_active_threads; t++) 
+      while (!work_done[t]) {
+        // yeild to avoid busy-waiting  
+        yield(); 
+      }
+  
+  perf_end_function("multihead_attention");
 }
+
 
 float* forward(Transformer* transformer, int token, int pos) {
   perf_start_function("forward");
@@ -424,7 +783,6 @@ float* forward(Transformer* transformer, int token, int pos) {
   float* x = s->x;
   int dim = p->dim;
   int kv_dim = (p->dim * p->n_kv_heads) / p->n_heads;
-  int kv_mul = p->n_heads / p->n_kv_heads; // integer multiplier of the kv sharing in multiquery
   int hidden_dim = p->hidden_dim;
   int head_size = dim / p->n_heads;
 
@@ -465,45 +823,8 @@ float* forward(Transformer* transformer, int token, int pos) {
       }
     }
 
-    // multihead attention. iterate over all heads
-    int h;
-    // #pragma omp parallel for private(h)
-    for (h = 0; h < p->n_heads; h++) {
-      // get the query vector for this head
-      float* q = s->q + h * head_size;
-      // attention scores for this head
-      float* att = s->att + h * p->seq_len;
-      // iterate over all timesteps, including the current one
-      for (int t = 0; t <= pos; t++) {
-        // get the key vector for this head and at this timestep
-        float* k = s->key_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
-        // calculate the attention score as the dot product of q and k
-        float score = 0.0f;
-        for (int i = 0; i < head_size; i++) {
-          score += q[i] * k[i];
-        }
-        score /= sqrtf(head_size);
-        // save the score to the attention buffer
-        att[t] = score;
-      }
-
-      // softmax the scores to get attention weights, from 0..pos inclusively
-      softmax(att, pos + 1);
-
-      // weighted sum of the values, store back into xb
-      float* xb = s->xb + h * head_size;
-      memset(xb, 0, head_size * sizeof(float));
-      for (int t = 0; t <= pos; t++) {
-        // get the value vector for this head and at this timestep
-        float* v = s->value_cache + loff + t * kv_dim + (h / kv_mul) * head_size;
-        // get the attention weight for this timestep
-        float a = att[t];
-        // accumulate the weighted value into xb
-        for (int i = 0; i < head_size; i++) {
-          xb[i] += a * v[i];
-        }
-      }
-    }
+    // Call Hybrid Parallel Attention
+    multihead_attention(s, p, w, l, pos);
 
     // final matmul to get the output of the attention
     matmul(s->xb2, s->xb, w->wo + l * dim * dim, dim, dim);
@@ -1005,7 +1326,7 @@ void generate(Transformer* transformer, Tokenizer* tokenizer, Sampler* sampler, 
   int token = prompt_tokens[0]; // kick off with the first token in the prompt
   int pos = 0;     // position in the sequence
   int first_token_generated = 0;  // flag to track when first token is generated
-  
+
   while (pos < steps) {
     // forward the transformer to get logits for the next token
     float* logits = forward(transformer, token, pos);
@@ -1037,13 +1358,13 @@ void generate(Transformer* transformer, Tokenizer* tokenizer, Sampler* sampler, 
     }
 
     // init the timer here because the first iteration can be slower
-    if (start == 0) { start = time_in_ms(); }
+    if (start == 0) { start = perf_time_in_ms(); }
   }
   printf("\n");
 
   // report achieved tok/s (pos-1 because the timer starts after first iteration)
   if (pos > 1) {
-    long end = time_in_ms();
+    long end = perf_time_in_ms();
     eprintf("\nachieved tok/s: %f\n", (pos - 1) / (double)(end - start) * 1000);
     perf_metrics.total_tokens_generated = pos - 1;
     perf_metrics.total_inference_time_ms = end - start;
@@ -1166,10 +1487,6 @@ void chat(Transformer* transformer, Tokenizer* tokenizer, Sampler* sampler,
   perf_end_function("chat");
 }
 
-void print_performance_metrics() {
-  perf_print_report();
-}
-
 // ----------------------------------------------------------------------------
 // CLI, include only if not testing
 #ifndef TESTING
@@ -1185,6 +1502,7 @@ void error_usage() {
   eprintf("  -i <string> input prompt\n");
   eprintf("  -m <string> mode: generate|chat, default: generate\n");
   eprintf("  -y <string> (optional) system prompt in chat mode\n");
+  eprintf("  -x <int>    number of matmul worker threads (default: 3)\n");
   exit(EXIT_FAILURE);
 }
 
@@ -1193,10 +1511,10 @@ void error_usage() {
 
 /**
  * @brief Structure to hold command-line arguments.
- * 
+ *
  * @author Syed Taha
- * @date   1st December 2025  
- * 
+ * @date   1st December 2025
+ *
  * @details
  * This structure encapsulates the various command-line arguments that can be
  * passed to the program. It includes parameters for temperature, top-p sampling,
@@ -1211,19 +1529,20 @@ typedef struct {
   unsigned long long rng_seed;
   char* mode;
   char* system_prompt;
-} Args;
+  int num_threads; // -x flag: number of matmul worker threads
+} Args; 
 
 /**
  * @brief Parse command-line arguments and populate the Args structure.
- * 
+ *
  * @param argc Number of command-line arguments.
  * @param argv Array of command-line argument strings.
  * @param args Pointer to Args structure to populate.
  * @return int Returns 0 on success, -1 on failure.
- * 
+ *
  * @author Syed Taha
- * @date   1st December 2025  
- * 
+ * @date   1st December 2025
+ *
  * @details
  * This function processes the command-line arguments provided to the program,
  * extracting values for temperature, top-p sampling, number of steps, input prompt,
@@ -1239,6 +1558,8 @@ int argparse(int argc, char* argv[], Args* args) {
   args->rng_seed = 0;            // seed rng with time by default
   args->mode = "generate";       // generate|chat
   args->system_prompt = NULL;    // the (optional) system prompt to use in chat mode
+  args->num_threads = 3;         // default number of matmul worker threads
+
 
   for (int i = 1; i < argc; i += 2) {
     // do some basic validation
@@ -1253,13 +1574,17 @@ int argparse(int argc, char* argv[], Args* args) {
     else if (argv[i][1] == 'i') { args->prompt = argv[i + 1]; }
     else if (argv[i][1] == 'm') { args->mode = argv[i + 1]; }
     else if (argv[i][1] == 'y') { args->system_prompt = argv[i + 1]; }
+    else if (argv[i][1] == 'x') { args->num_threads = atoi(argv[i + 1]); }
     else { return -1; }
   }
 
-  if (args->rng_seed <=0) args->rng_seed = (unsigned long long)rdtime();
+  if (args->rng_seed <= 0) args->rng_seed = (unsigned long long)rdtime();
   if (args->temperature < 0.0f) args->temperature = 0.0f;
   if (args->topp < 0.0f || args->topp > 1.0f) args->topp = 0.9f;
   if (args->steps < 0) args->steps = 0;
+  if (args->num_threads <= 0) args->num_threads = 1;
+  // cap to reasonable upper bound to avoid excessive allocations in xv6
+  if (args->num_threads > 16) args->num_threads = 16; 
 
   return 0;
 }
@@ -1275,9 +1600,9 @@ int main(int argc, char* argv[]) {
   perf_register_function("generate");
   perf_register_function("chat");
   perf_register_function("forward");
+  perf_register_function("multihead_attention");
   perf_register_function("matmul");
   perf_register_function("rmsnorm");
-  perf_register_function("softmax");
   perf_register_function("sample");
   perf_register_function("encode");
   perf_register_function("decode");
@@ -1286,12 +1611,15 @@ int main(int argc, char* argv[]) {
 
   if (argparse(argc, argv, &args) != 0) error_usage();
 
+  // apply user-configured thread count for matmul worker pool
+  g_num_threads = args.num_threads; 
+
   // Initialize performance metrics
   perf_metrics.start_time_ms = perf_time_in_ms();
   perf_metrics.initial_ram_usage = getramused();
   perf_metrics.peak_ram_usage = perf_metrics.initial_ram_usage;
-  
-  Transformer transformer; 
+
+  Transformer transformer;
   Tokenizer tokenizer;
 
   perf_start_function("fetch_model_weights");
@@ -1311,16 +1639,19 @@ int main(int argc, char* argv[]) {
   build_transformer(&transformer, GLOBAL_WEIGHTS_PTR);
   build_tokenizer(&tokenizer, GLOBAL_TOKENIZER_PTR, transformer.config.vocab_size);
 
-  update_peak_ram();
+  perf_update_peak_ram();
 
-  if (args.steps == 0 || args.steps > transformer.config.seq_len) 
+  if (args.steps == 0 || args.steps > transformer.config.seq_len)
     args.steps = transformer.config.seq_len; // override to ~max length
 
   // build the Sampler
   Sampler sampler;
   build_sampler(&sampler, transformer.config.vocab_size, args.temperature, args.topp, args.rng_seed);
 
-  update_peak_ram();
+
+  perf_update_peak_ram();
+
+  init_thread_pool();
 
   // run!
   if (strcmp(args.mode, "generate") == 0) {
@@ -1340,8 +1671,8 @@ int main(int argc, char* argv[]) {
   free_transformer(&transformer);
 
   perf_metrics.end_time_ms = perf_time_in_ms();
-  update_peak_ram();
-  print_performance_metrics();
+  perf_update_peak_ram();
+  perf_print_report();
 
   release_and_exit(EXIT_SUCCESS);
 

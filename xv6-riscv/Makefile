@@ -8,13 +8,20 @@
 K=kernel
 U=user
 
+# Scheduler configuration (can be overridden: make SCHED_FLAG=PRIORITY qemu)
+# Options:
+#   PRIORITY - Priority Scheduler
+#   MLFQ     - Multi-Level Feedback Queue Scheduler
+#   (default) - Round Robin Scheduler
+SCHED_FLAG ?=
+
+# Base kernel objects (always compiled)
 OBJS = \
   $K/entry.o \
   $K/kalloc.o \
   $K/string.o \
   $K/main.o \
   $K/vm.o \
-  $K/proc.o \
   $K/swtch.o \
   $K/trampoline.o \
   $K/trap.o \
@@ -32,6 +39,10 @@ OBJS = \
   $K/kernelvec.o \
   $K/plic.o \
   $K/virtio_disk.o
+
+
+# Always include proc.o (contains process management, not just scheduler)
+OBJS += $K/proc.o
 
 OBJS_KCSAN = \
   $K/start.o \
@@ -113,6 +124,18 @@ CFLAGS += -fno-builtin-printf -fno-builtin-fprintf -fno-builtin-vprintf
 CFLAGS += -I.
 CFLAGS += $(shell $(CC) -fno-stack-protector -E -x c /dev/null >/dev/null 2>&1 && echo -fno-stack-protector)
 
+# Conditional scheduler compilation based on SCHED_FLAG
+ifeq ($(SCHED_FLAG),PRIORITY)
+  # Priority scheduler: use sched_priority.c instead of proc.c scheduler
+  CFLAGS += -DPRIORITY_SCHED
+  OBJS += $K/sched_priority.o
+else ifeq ($(SCHED_FLAG),MLFQ)
+  # MLFQ scheduler: use sched_mlfq.c instead of proc.c scheduler
+  CFLAGS += -DMLFQ_SCHED
+  OBJS += $K/sched_mlfq.o
+endif
+
+
 ifeq ($(LAB),net)
 CFLAGS += -DNET_TESTS_PORT=$(SERVERPORT)
 endif
@@ -133,6 +156,7 @@ endif
 LDFLAGS = -z max-page-size=4096
 
 $K/kernel: $(OBJS) $(OBJS_KCSAN) $K/kernel.ld
+	@echo "DEBUG: Building kernel with CFLAGS=$(CFLAGS)"
 	$(LD) $(LDFLAGS) -T $K/kernel.ld -o $K/kernel $(OBJS) $(OBJS_KCSAN)
 	$(OBJDUMP) -S $K/kernel > $K/kernel.asm
 	$(OBJDUMP) -t $K/kernel | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $K/kernel.sym
@@ -147,7 +171,7 @@ $K/%.o: $K/%.S
 tags: $(OBJS)
 	etags kernel/*.S kernel/*.c
 
-ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o $U/testutil.o $U/xstdlib.o $U/xmath.o $U/xstrlib.o
+ULIB = $U/ulib.o $U/usys.o $U/printf.o $U/umalloc.o $U/testutil.o $U/xstdlib.o $U/xmath.o $U/xstrlib.o $U/mutex.o
 
 ifeq ($(LAB),lock)
 ULIB += $U/statistics.o
@@ -164,11 +188,6 @@ $U/_testsha: $U/testsha.o $(ULIB) $U/sha256.o
 	$(OBJDUMP) -S $@ > $U/testsha.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/testsha.sym
 
-$U/_inference: $U/inference.o $(ULIB) $U/ftpclient.o $U/sha256.o
-	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/inference.o $(ULIB) $U/ftpclient.o $U/sha256.o
-	$(OBJDUMP) -S $@ > $U/inference.asm
-	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/inference.sym
-
 $U/_llama: $U/llama.o $U/perf.o $(ULIB) $U/ftpclient.o $U/sha256.o
 	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/llama.o $U/perf.o $(ULIB) $U/ftpclient.o $U/sha256.o
 	$(OBJDUMP) -S $@ > $U/llama.asm
@@ -178,6 +197,20 @@ $U/_testperf: $U/testperf.o $U/perf.o $(ULIB)
 	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/testperf.o $U/perf.o $(ULIB)
 	$(OBJDUMP) -S $@ > $U/testperf.asm
 	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/testperf.sym
+
+$U/_threadtest: $U/threadtest.o $U/perf.o $(ULIB)
+	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/threadtest.o $U/perf.o $(ULIB)
+	$(OBJDUMP) -S $@ > $U/threadtest.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/threadtest.sym
+
+$U/_schedtest: $U/schedtest.o $(ULIB)
+	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $U/schedtest.o $(ULIB)
+	$(OBJDUMP) -S $@ > $U/schedtest.asm
+	$(OBJDUMP) -t $@ | sed '1,/SYMBOL TABLE/d; s/ .* / /; /^$$/d' > $U/schedtest.sym
+
+# Special compilation rule for schedtest.c to include scheduler flags
+$U/schedtest.o: $U/schedtest.c
+	$(CC) $(CFLAGS) -c -o $U/schedtest.o $U/schedtest.c 
 
 _%: %.o $(ULIB) $U/user.ld
 	$(LD) $(LDFLAGS) -T $U/user.ld -o $@ $< $(ULIB)
@@ -236,10 +269,11 @@ UPROGS=\
 	$U/_testxstrlib\
 	$U/_testsha\
 	$U/_testshm\
-	$U/_inference\
 	$U/_llama\
+	$U/_threadtest\
 	$U/_testram\
 	$U/_testperf\
+	$U/_schedtest\
 
 
 ifeq ($(LAB),util)
@@ -353,7 +387,7 @@ QEMUGDB = $(shell if $(QEMU) -help | grep -q '^-gdb'; \
 	then echo "-gdb tcp::$(GDBPORT)"; \
 	else echo "-s -p $(GDBPORT)"; fi)
 ifndef CPUS
-CPUS := 3
+CPUS := 8
 endif
 ifeq ($(LAB),fs)
 CPUS := 1
@@ -372,7 +406,7 @@ QEMUOPTS += -netdev user,id=net0,hostfwd=udp::$(FWDPORT1)-:2000,hostfwd=udp::$(F
 QEMUOPTS += -device e1000,netdev=net0,bus=pcie.0
 endif
 
-# makes a new fs.img
+# makes a new fs.img (default Round Robin scheduler)
 qemu: check-qemu-version newfs.img $K/kernel fs.img
 	$(QEMU) $(QEMUOPTS)
 
@@ -380,12 +414,54 @@ qemu: check-qemu-version newfs.img $K/kernel fs.img
 qemu-fs: check-qemu-version $K/kernel fs.img
 	$(QEMU) $(QEMUOPTS)
 
+# Convenience targets for different schedulers
+# Usage: make qemu-priority  or  make qemu-mlfq
+
+# Run with Priority Scheduler
+qemu-priority: 
+	@echo "Building xv6 with Priority Scheduler..."
+	$(MAKE) clean
+	$(MAKE) SCHED_FLAG=PRIORITY $K/kernel
+	$(MAKE) SCHED_FLAG=PRIORITY qemu
+
+# Run with MLFQ Scheduler
+qemu-mlfq: 
+	@echo "Building xv6 with MLFQ Scheduler..."
+	$(MAKE) clean
+	$(MAKE) SCHED_FLAG=MLFQ $K/kernel
+	$(MAKE) SCHED_FLAG=MLFQ qemu
+
+# Run with default Round Robin Scheduler
+qemu-rr: 
+	@echo "Building xv6 with Round Robin Scheduler (default)..."
+	$(MAKE) clean
+	$(MAKE) qemu
+
 .gdbinit: .gdbinit.tmpl-riscv
 	sed "s/:1234/:$(GDBPORT)/" < $^ > $@
 
 qemu-gdb: $K/kernel .gdbinit fs.img
 	@echo "*** Now run 'gdb' in another window." 1>&2
 	$(QEMU) $(QEMUOPTS) -S $(QEMUGDB)
+
+qemu-nox: check-qemu-version newfs.img $K/kernel fs.img
+	$(QEMU) $(QEMUOPTS) -nographic
+
+# Qemu nox but for priority scheduler
+qemu-nox-priority: clean
+	@echo "Building xv6 with Priority Scheduler..."
+	$(MAKE) clean
+	$(MAKE) SCHED_FLAG=PRIORITY qemu-nox
+
+qemu-nox-mlfq: clean
+	@echo "Building xv6 with MLFQ Scheduler..."
+	$(MAKE) clean
+	$(MAKE) SCHED_FLAG=MLFQ qemu-nox
+
+qemu-nox-rr: clean
+	@echo "Building xv6 with Round Robin Scheduler (default)..."
+	$(MAKE) clean
+	$(MAKE) qemu-nox
 
 ifeq ($(LAB),net)
 # try to generate a unique port for the echo server

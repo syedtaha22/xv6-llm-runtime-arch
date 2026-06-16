@@ -26,7 +26,7 @@
 #include "user/user.h"
 #include "testutil.h"
 
-/** @brief Test data string written to shared memory segments. */
+ /** @brief Test data string written to shared memory segments. */
 #define TEST_DATA "Hello from persistent shared memory!"
 /** @brief Name of the test segment for basic persistence tests. */
 #define TEST_SEGMENT "persistent_test"
@@ -51,13 +51,13 @@
 void* get_shmaddr(const char* segment_name, uint64 size, int flags, int* shmid) {
   *shmid = shmget(segment_name, size, flags);
   if (*shmid < 0) {
-    failnoex(2, "shmget failed");
+    failnoex("  shmget failed");
     return (void*)-1;
   }
 
   void* shmaddr = shmat(*shmid, 0, SHM_RDWR);
   if (shmaddr == (void*)-1) {
-    failnoex(2, "shmat failed");
+    failnoex("  shmat failed");
     return (void*)-1;
   }
 
@@ -75,23 +75,23 @@ void* get_shmaddr(const char* segment_name, uint64 size, int flags, int* shmid) 
  * @return int 0 on success, 1 on failure.
  */
 int test_child_write() {
-  info(1, "Starting child write test...");
+  info(" Starting child write test...");
 
   int pid, status;
 
   pid = fork();
   if (pid < 0) {
-    failnoex(1, "fork failed");
+    failnoex(" fork failed");
     return 1;
   }
 
   if (pid == 0) {
     // Child process
     int shmid = -1;
-    void *shmaddr;
-    char *data;
+    void* shmaddr;
+    char* data;
 
-    info(2, "Creating persistent shared memory segment in child process...");
+    info("  Creating persistent shared memory segment in child process...");
 
     // Create shared memory segment with SHM_PERSIST
     shmaddr = get_shmaddr(TEST_SEGMENT, 4096, IPC_CREAT | SHM_PERSIST, &shmid);
@@ -102,8 +102,8 @@ int test_child_write() {
     printf("  wrote \"%s\" to shmaddr %p with shmid %d\n", TEST_DATA, shmaddr, shmid);
 
     // Detach (but memory should persist due to SHM_PERSIST)
-    if (shmdt(shmaddr) < 0) fail(2, "shmdt failed");
-    info(2, "shmdt succeeded, memory should persist");
+    if (shmdt(shmaddr) < 0) fail("  shmdt failed");
+    info("  shmdt succeeded, memory should persist");
 
     exit(0);
   }
@@ -111,11 +111,11 @@ int test_child_write() {
   // Parent waits for child to complete
   wait(&status);
   if (status != 0) {
-    failnoex(1, "Child exited with error");
+    failnoex(" Child exited with error");
     return 1;
   }
 
-  pass(1, "Child created persistent shared memory");
+  pass(" Child created persistent shared memory");
   return 0;
 }
 
@@ -131,22 +131,22 @@ int test_child_write() {
  * @return int 0 on success, 1 on failure.
  */
 int test_child_read_and_mark_delete() {
-  info(1, "Starting child read and mark for deletion test...");
+  info(" Starting child read and mark for deletion test...");
   int pid, status;
 
   pid = fork();
   if (pid < 0) {
-    failnoex(1, "fork failed");
+    failnoex(" fork failed");
     return 1;
   }
 
   if (pid == 0) {
     // Child process
     int shmid = 0;
-    void *shmaddr;
-    char *data;
+    void* shmaddr;
+    char* data;
 
-    info(2, "Attempting to access persistent shared memory...");
+    info("  Attempting to access persistent shared memory...");
 
     // Get the shared memory ID for the existing segment (no SHM_PERSIST flag)
     shmaddr = get_shmaddr(TEST_SEGMENT, 4096, 0, &shmid);
@@ -156,18 +156,19 @@ int test_child_read_and_mark_delete() {
     printf("  read \"%s\" from shmaddr %p with shmid %d\n", data, shmaddr, shmid);
 
     if (strcmp(data, TEST_DATA) == 0) {
-      pass(2, "Data matches! Persistent shared memory works!");
-    } else {
-      failnoex(2, "Data mismatch!");
+      pass("  Data matches! Persistent shared memory works!");
+    }
+    else {
+      failnoex("  Data mismatch!");
     }
 
     // Mark the segment for deletion (IPC_RMID) - but don't detach yet
-    if (shmctl(shmid, IPC_RMID, 0) < 0) fail(2, "shmctl IPC_RMID failed");
-    info(2, "Marked segment for deletion with IPC_RMID");
+    if (shmctl(shmid, IPC_RMID, 0) < 0) fail("  shmctl IPC_RMID failed");
+    info("  Marked segment for deletion with IPC_RMID");
 
     // Detach - this should trigger actual deletion since refcount becomes 0
-    if (shmdt(shmaddr) < 0) fail(2, "shmdt failed");
-    info(2, "shmdt succeeded - segment should now be deleted");
+    if (shmdt(shmaddr) < 0) fail("  shmdt failed");
+    info("  shmdt succeeded - segment should now be deleted");
 
     exit(0);
   }
@@ -175,11 +176,11 @@ int test_child_read_and_mark_delete() {
   // Parent waits for child to complete
   wait(&status);
   if (status != 0) {
-    failnoex(1, "Child exited with error");
+    failnoex(" Child exited with error");
     return 1;
   }
 
-  pass(1, "Child accessed persistent memory and marked for deletion");
+  pass(" Child accessed persistent memory and marked for deletion");
   return 0;
 }
 
@@ -194,13 +195,13 @@ int test_child_read_and_mark_delete() {
  * @return int 0 on success, 1 on failure.
  */
 int test_child_verify_deleted() {
-  info(1, "Starting child verify deleted test...");
+  info(" Starting child verify deleted test...");
   int pid, status;
 
 
   pid = fork();
   if (pid < 0) {
-    failnoex(1, "fork failed");
+    failnoex(" fork failed");
     return 1;
   }
 
@@ -208,27 +209,27 @@ int test_child_verify_deleted() {
     // Child process
     int shmid = -1;
 
-    info(2, "Testing if shared memory was properly deleted...");
+    info("  Testing if shared memory was properly deleted...");
 
     // Try to get the shared memory segment
     shmid = shmget(TEST_SEGMENT, 4096, 0);  // Don't create, just get existing
     if (shmid < 0) {
-      pass(2, "shmget failed as expected (segment was deleted)");
+      pass("  shmget failed as expected (segment was deleted)");
       exit(0);  // This is the expected behavior
     }
 
     // If we get here, the segment still exists, which is bad
-    fail(2, "shmget succeeded, segment was not deleted!");
+    fail("  shmget succeeded, segment was not deleted!");
   }
 
   // Parent waits for child to complete
   wait(&status);
   if (status != 0) {
-    failnoex(1, "Child exited with error");
+    failnoex(" Child exited with error");
     return 1;
   }
 
-  pass(1, "Lazy deletion verified");
+  pass(" Lazy deletion verified");
   return 0;
 }
 
@@ -245,40 +246,40 @@ int test_child_verify_deleted() {
 int test_large_buffer_create() {
   int pid, status;
 
-  info(1, "Starting large shared memory buffer creation test...");
+  info(" Starting large shared memory buffer creation test...");
 
   pid = fork();
   if (pid < 0) {
-    failnoex(1, "fork failed");
+    failnoex(" fork failed");
     return 1;
   }
 
   if (pid == 0) {
     // Child process
     int shmid = -1;
-    void *shmaddr;
-    char *data;
+    void* shmaddr;
+    char* data;
     int i;
 
     printf("  Creating large shared memory segment of size %d bytes: ", LARGE_SIZE);
     shmaddr = get_shmaddr(LARGE_SEGMENT, LARGE_SIZE, IPC_CREAT | SHM_PERSIST, &shmid);
-    info(0, "OK");
+    info("OK");
 
     data = (char*)shmaddr;
     for (i = 0; i < LARGE_SIZE; i++) data[i] = (i % 256);  // Cycle through 0-255
-    
-    if (shmdt(shmaddr) < 0) fail(2, "shmdt failed");
+
+    if (shmdt(shmaddr) < 0) fail("  shmdt failed");
     exit(0);
   }
 
   // Parent waits for child to complete
   wait(&status);
   if (status != 0) {
-    failnoex(1, "Child exited with error");
+    failnoex(" Child exited with error");
     return 1;
   }
 
-  pass(1, "Large buffer created successfully");
+  pass(" Large buffer created successfully");
   return 0;
 }
 
@@ -293,28 +294,28 @@ int test_large_buffer_create() {
  * @return int 0 on success, 1 on failure.
  */
 int test_large_buffer_verify() {
-  info(1, "Starting large shared memory buffer verification test...");
+  info(" Starting large shared memory buffer verification test...");
   int pid, status;
 
   pid = fork();
   if (pid < 0) {
-    failnoex(1, "fork failed");
+    failnoex(" fork failed");
     return 1;
   }
 
   if (pid == 0) {
     // Child process
     int shmid = -1;
-    void *shmaddr;
-    char *data;
+    void* shmaddr;
+    char* data;
     int i;
     int errors = 0;
 
-    info(2, "Accessing large shared memory segment");
+    info("  Accessing large shared memory segment");
 
     shmaddr = get_shmaddr(LARGE_SEGMENT, LARGE_SIZE, 0, &shmid);
 
-    info(2, "Checking buffer sequence");
+    info("  Checking buffer sequence");
     data = (char*)shmaddr;
     for (i = 0; i < LARGE_SIZE; i++) {
       char expected = (i % 256);
@@ -324,14 +325,14 @@ int test_large_buffer_verify() {
       }
     }
 
-    if (errors == 0) pass(2, "all bytes correct!");
-    else fail(2, "errors found");
-    
+    if (errors == 0) pass("  all bytes correct!");
+    else fail("  errors found");
 
-    if (shmdt(shmaddr) < 0) fail(2, "shmdt failed");
+
+    if (shmdt(shmaddr) < 0) fail("  shmdt failed");
 
     // Mark for deletion
-    if (shmctl(shmid, IPC_RMID, 0) < 0) fail(2, "shmctl failed");
+    if (shmctl(shmid, IPC_RMID, 0) < 0) fail("  shmctl failed");
 
     exit(0);
   }
@@ -339,16 +340,16 @@ int test_large_buffer_verify() {
   // Parent waits for child to complete
   wait(&status);
   if (status != 0) {
-    failnoex(1, "Child exited with error");
+    failnoex(" Child exited with error");
     return 1;
   }
 
-  pass(1, "Large buffer verified successfully");
+  pass(" Large buffer verified successfully");
   return 0;
 }
 
-int (*tests[])() = { 
-  test_child_write, 
+int (*tests[])() = {
+  test_child_write,
   test_child_read_and_mark_delete,
   test_child_verify_deleted,
   test_large_buffer_create,
@@ -369,10 +370,10 @@ int (*tests[])() = {
  * total tests run, passed, and failed. Uses testutil.h for consistent
  * colored output formatting.
  */
-int main(int argc, char *argv[]) {
+int main(int argc, char* argv[]) {
   set_tag("SHMTEST");
 
-  info(0, "=== Comprehensive Shared Memory Test Suite ===");
+  info("=== Comprehensive Shared Memory Test Suite ===");
 
   int num_tests = sizeof(tests) / sizeof(tests[0]);
   int failed_tests = 0;
@@ -381,11 +382,5 @@ int main(int argc, char *argv[]) {
   for (int i = 0; i < num_tests; i++) failed_tests += tests[i]();
   passed_tests = num_tests - failed_tests;
 
-  // Print summary
-  printf("\nSummary: %d tests run, %d passed, %d failed\n", num_tests, passed_tests, failed_tests);
-
-  if (failed_tests > 0) fail(0, "Some tests failed\n");
-
-  pass(0, "ALL TESTS PASSED!\n");
-  exit(0);
+  return summary(passed_tests, num_tests);
 }

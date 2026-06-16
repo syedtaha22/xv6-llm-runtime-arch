@@ -174,10 +174,10 @@ void perf_print_report(void) {
         }
     }
 
-    // Bubble sort by total time
+    // Bubble sort by total self time
     for (int i = 0; i < sorted_count - 1; i++) {
         for (int j = 0; j < sorted_count - i - 1; j++) {
-            if (sorted_functions[j].total_time_ms < sorted_functions[j+1].total_time_ms) {
+            if (sorted_functions[j].self_time_ms < sorted_functions[j+1].self_time_ms) {
                 PerfFunction temp = sorted_functions[j];
                 sorted_functions[j] = sorted_functions[j+1];
                 sorted_functions[j+1] = temp;

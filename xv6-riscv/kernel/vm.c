@@ -7,6 +7,7 @@
 #include "spinlock.h"
 #include "proc.h"
 #include "fs.h"
+#include "shm.h"
 
 /*
  * the kernel's page table.
@@ -482,6 +483,122 @@ vmfault(pagetable_t pagetable, uint64 va, int read)
     return 0;
   }
   return mem;
+}
+
+/**
+ * @brief Share user mappings from old pagetable into new pagetable up to sz bytes.
+ * Does not copy physical pages, only creates mappings to the same physical
+ * pages in the new pagetable.
+ * 
+ * @param old The old pagetable from which to share mappings.
+ * @param new The new pagetable where mappings will be created.
+ * @param sz The size in bytes up to which to share mappings.
+ * @return int returns 0 on success, -1 on failure.
+ */
+int
+uvmshare(pagetable_t old, pagetable_t new, uint64 sz)
+{
+  pte_t *pte;
+  uint64 pa;
+  int flags;
+
+  for(uint64 i = 0; i < sz; i += PGSIZE){
+    if((pte = walk(old, i, 0)) == 0)
+      panic("uvmshare: pte should exist");
+    if((*pte & PTE_V) == 0)
+      panic("uvmshare: page not present");
+    pa = PTE2PA(*pte);
+    flags = PTE_FLAGS(*pte);
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
+      return -1;
+    }
+  }
+  return 0;
+}
+
+/**
+ * @brief Fast sharing of SHM mappings from parent process to child thread.
+ *
+ * This function copies only the mappings explicitly recorded in the
+ * parent's per-process SHM table, avoiding a linear scan of the entire
+ * SHM virtual range. It also updates the child's per-process table and
+ * increments global segment refcounts for each attached segment.
+ *
+ * @param parent The process that already has SHM mappings.
+ * @param child The new thread/process to receive mappings.
+ * @return 0 on success, -1 on failure (partial mappings are rolled back on failure).
+ */
+int
+uvmshare_shm(struct proc *parent, struct proc *child)
+{
+  // iterate parent's attachment list
+  for (int i = 0; i < NSHM; i++) {
+    int shmid = parent->shm_attached[i].shmid;
+    uint64 va = parent->shm_attached[i].va;
+    if (shmid == -1) continue;
+
+    // validate shmid
+    acquire(&shm_table.lock);
+    if (shmid < 0 || shmid >= NSHM || shm_table.segs[shmid].id == -1) {
+      release(&shm_table.lock);
+      continue;
+    }
+    struct shm_segment *seg = &shm_table.segs[shmid];
+
+    // map each physical page into child's pagetable at the same VA
+    int map_failed = 0;
+    for (uint64 j = 0; j < seg->npages; j++) {
+      uint64 page_va = va + j * PGSIZE;
+      uint64 pa = seg->phys_pages[j];
+      // If already mapped skip
+      if (walkaddr(child->pagetable, page_va) != 0) continue;
+      if (mappages(child->pagetable, page_va, PGSIZE, pa, PTE_U | PTE_R | PTE_W) != 0) {
+        map_failed = 1;
+        break;
+      }
+    }
+
+    if (map_failed) {
+      // rollback any pages we mapped for this segment
+      for (uint64 j = 0; j < seg->npages; j++) {
+        uint64 page_va = va + j * PGSIZE;
+        uint64 pa = walkaddr(child->pagetable, page_va);
+        if (pa == seg->phys_pages[j]) {
+          uvmunmap(child->pagetable, page_va, 1, 0);
+        }
+      }
+      release(&shm_table.lock);
+      return -1;
+    }
+
+    // copy tracking entry into child (find free slot)
+    int child_slot = -1;
+    for (int k = 0; k < NSHM; k++) {
+      if (child->shm_attached[k].shmid == -1) { child_slot = k; break; }
+    }
+    if (child_slot == -1) {
+      // no slot, rollback maps
+      for (uint64 j = 0; j < seg->npages; j++) {
+        uint64 page_va = va + j * PGSIZE;
+        uint64 pa = walkaddr(child->pagetable, page_va);
+        if (pa == seg->phys_pages[j]) uvmunmap(child->pagetable, page_va, 1, 0);
+      }
+      release(&shm_table.lock);
+      return -1;
+    }
+
+    child->shm_attached[child_slot].shmid = shmid;
+    child->shm_attached[child_slot].va = va;
+
+    // increment global refcount to reflect child's attachment
+    acquire(&seg->lock);
+    seg->refcount++;
+    release(&seg->lock);
+
+    release(&shm_table.lock);
+  }
+
+  return 0;
 }
 
 int
