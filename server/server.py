@@ -21,6 +21,8 @@ import struct
 import hashlib
 import os
 
+from tqdm import tqdm
+
 from custom_logger import LoggerSetup
 
 # Message type constants
@@ -34,6 +36,11 @@ MSG_ERROR = 0x06
 # File identifiers
 FILE_WEIGHTS = 0x01
 FILE_TOKENIZER = 0x02
+
+FILE_LABELS = {
+    FILE_WEIGHTS: 'weights',
+    FILE_TOKENIZER: 'tokenizer',
+}
 
 # Configuration
 DEFAULT_PORT = 9999
@@ -215,6 +222,8 @@ class LLMRFTPServer:
             'packets_sent': 0,
             'errors': 0,
         }
+        # Tracks chunks sent per (client, file) for progress bars.
+        self.transfer_progress = {}
 
         # Default file paths
         if file_paths is None:
@@ -364,6 +373,7 @@ class LLMRFTPServer:
                 self.socket.sendto(pkt, client_addr)
                 packets_sent += 1
                 self.stats['packets_sent'] += 1
+                self._update_transfer_progress(client_addr, file_id, i)
 
         # logger.info(f"→ Sent DATA_RANGE_REQ response to {client_addr}: file={file_id}, " 
         #             f"range=[{start_idx}, {min(start_idx + count, f.total_chunks)}), "
@@ -420,6 +430,7 @@ class LLMRFTPServer:
 
         # Parse chunk indices and send each as a separate UDP packet
         packets_sent = 0
+        offset = 4
         for idx in range(count):
             if offset + 4 > len(data):
                 break
@@ -434,11 +445,56 @@ class LLMRFTPServer:
                     self.socket.sendto(pkt, client_addr)
                     packets_sent += 1
                     self.stats['packets_sent'] += 1
+                    self._update_transfer_progress(client_addr, file_id, chunk_idx)
 
         logger.info(f"→ Sent RETRANS_REQ response to {client_addr}: file={file_id}, "
                     f"requested_indices={count}, sent {packets_sent} packets")
 
         return None  # Already sent, no response to return
+
+    def _update_transfer_progress(self, client_addr, file_id, chunk_idx):
+        """
+        Update the console progress bar for a file transfer.
+
+        Maintains one tqdm bar per (client, file), deduped by chunk index so
+        that retransmissions of already-sent chunks don't inflate progress
+        past 100%. The bar is closed and removed once every chunk has been
+        sent.
+
+        Parameters
+        ----------
+        client_addr : tuple
+            Client address as (host, port).
+        file_id : int
+            File identifier for the chunk just sent.
+        chunk_idx : int
+            Zero-based index of the chunk just sent.
+        """
+        if file_id not in FILE_LABELS:
+            return
+
+        key = (client_addr, file_id)
+        total = self.files[file_id].total_chunks
+        entry = self.transfer_progress.get(key)
+        if entry is None:
+            bar = tqdm(
+                total=total,
+                desc=f"{FILE_LABELS[file_id]} -> {client_addr[0]}:{client_addr[1]}",
+                unit="chunk",
+                leave=False,
+            )
+            entry = {'bar': bar, 'seen': set()}
+            self.transfer_progress[key] = entry
+
+        seen = entry['seen']
+        if chunk_idx not in seen:
+            seen.add(chunk_idx)
+            entry['bar'].update(1)
+
+        if len(seen) >= total:
+            entry['bar'].close()
+            del self.transfer_progress[key]
+            logger.info(f"Completed sending {FILE_LABELS[file_id]} to {client_addr}: {total} chunks")
 
     def data_packet(self, file_id, chunk_idx, chunk_data):
         """
