@@ -129,7 +129,7 @@ typedef struct {
     float tokens_per_second;
 
     // New LLM-specific metrics
-    long long time_to_first_token_ms;      // TTFT: cycles until first token output
+    long long time_to_first_token_ms;      // TTFT in ms from the start of generate(); -1 if no token was sampled
 } PerfMetrics;
 
 extern PerfFunction *perf_functions;   /// @brief Array of profiled functions

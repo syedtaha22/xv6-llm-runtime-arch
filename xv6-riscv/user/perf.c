@@ -229,7 +229,11 @@ void perf_print_report(void) {
     printf("  %15s %8lld ms\n", "Inference", perf_metrics.total_inference_time_ms);
 
     printf("\nLLM METRICS:\n");
-    printf("  %15s %8lld ms\n", "TTFT", perf_metrics.time_to_first_token_ms);
+    if (perf_metrics.time_to_first_token_ms < 0)
+        printf("  %15s %8s\n", "TTFT", "n/a");
+    else
+        printf("  %15s %8lld ms\n", "TTFT", perf_metrics.time_to_first_token_ms);
+    printf("  %15s %8d tokens\n", "Prompt", perf_metrics.prompt_tokens);
 
     printf("\nTHROUGHPUT:\n");
     printf("  %15s %8d tokens\n", "Generated", perf_metrics.total_tokens_generated);

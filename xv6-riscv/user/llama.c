@@ -1326,6 +1326,9 @@ void generate(Transformer* transformer, Tokenizer* tokenizer, Sampler* sampler, 
   int token = prompt_tokens[0]; // kick off with the first token in the prompt
   int pos = 0;     // position in the sequence
   int first_token_generated = 0;  // flag to track when first token is generated
+  long long generate_start_ms = perf_time_in_ms(); // reference point for TTFT
+  perf_metrics.prompt_tokens = num_prompt_tokens;
+  perf_metrics.time_to_first_token_ms = -1;        // stays -1 when no token is sampled (prompt fills all steps)
 
   while (pos < steps) {
     // forward the transformer to get logits for the next token
@@ -1351,9 +1354,10 @@ void generate(Transformer* transformer, Tokenizer* tokenizer, Sampler* sampler, 
     safe_printf(piece); // same as printf("%s", piece), but skips "unsafe" bytes
     token = next;
 
-    // Track Time to First Token (TTFT) - capture when first output token is generated
-    if (!first_token_generated && pos > num_prompt_tokens) {
-      perf_metrics.time_to_first_token_ms = perf_time_in_ms() - perf_metrics.start_time_ms;
+    // Track Time to First Token (TTFT): time from the start of generate(), prompt
+    // prefill included, to the first sampled token.
+    if (!first_token_generated && pos >= num_prompt_tokens) {
+      perf_metrics.time_to_first_token_ms = perf_time_in_ms() - generate_start_ms;
       first_token_generated = 1;
     }
 
