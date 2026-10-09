@@ -1,0 +1,34 @@
+{
+  "model": "stories15M",
+  "temperature": 0.0,
+  "seed": 123,
+  "threads": [
+    1,
+    3,
+    5,
+    7
+  ],
+  "reps": 5,
+  "prompts": {
+    "short": "Once upon a time",
+    "long": "Once upon a time, there was a little girl named Lily. She loved to play outside in the sunshine. One day, she saw a big, red ball in the sky. It was the sun! She thought it was so"
+  },
+  "tests": {
+    "T1": {
+      "prompt": "short",
+      "steps": 50
+    },
+    "T2": {
+      "prompt": "short",
+      "steps": 100
+    },
+    "T3": {
+      "prompt": "long",
+      "steps": 50
+    },
+    "T4": {
+      "prompt": "long",
+      "steps": 100
+    }
+  }
+}

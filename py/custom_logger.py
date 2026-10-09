@@ -35,7 +35,7 @@ class LoggerSetup:
         self.log.setLevel(numeric_level)
 
         if not self.log.handlers:
-            coloredlogs.install(level=numeric_level, logger=self.log)
+            coloredlogs.install(level=numeric_level, logger=self.log, fmt='%(asctime)s %(levelname)s %(message)s')
 
             if log_dir is None:
                 log_dir = 'logs'
@@ -53,7 +53,7 @@ class LoggerSetup:
             file_handler = logging.FileHandler(log_file_path, mode='a')
             file_handler.setLevel(numeric_level)
 
-            file_formatter = logging.Formatter('%(asctime)s %(name)s %(levelname)s %(message)s')
+            file_formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
             file_handler.setFormatter(file_formatter)
 
             self.log.addHandler(file_handler)

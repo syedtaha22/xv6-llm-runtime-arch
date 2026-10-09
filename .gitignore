@@ -44,7 +44,7 @@ venv/
 # ===========================================
 #  Other script files
 # ===========================================
-*.sh
+# *.sh
 
 # ===========================================
 #  Temporary and Log Files
@@ -65,6 +65,13 @@ logs/
 # ===========================================
 # Ignore Temporarily 
 docs/
+
+# ===========================================
+#  Benchmark artifacts
+# ===========================================
+py/bench/build/
+py/bench/linux-baseline/cache/
+py/bench/linux-baseline/out/
 
 # ===========================================
 #  End of .gitignore
